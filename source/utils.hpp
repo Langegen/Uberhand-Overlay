@@ -907,7 +907,7 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                         const size_t offset = custOffset + std::stoul(offsetStr);
                                         currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
                                     }
-                                    unsigned int intValue = reversedHexToInt(currentHex);
+                                    int intValue = reversedHexToInt(currentHex);
                                     if (j_increment) { // Add increment value from the JSON to the displayed value
                                         intValue += std::stoi(json_string_value(j_increment));
                                     }

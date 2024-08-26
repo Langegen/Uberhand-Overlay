@@ -28,10 +28,11 @@ std::string asciiToHex(const std::string& asciiStr) {
 }
 
 std::string decimalToHex(const std::string& decimalStr) {
-    // assumes the decimal is a 32-bit integer
-    std::string hexadecimal = (std::stringstream{} << std::hex << std::setw(8) << std::setfill('0') << std::stoi(decimalStr)).str();
+    long long decimal_value = std::stoll(decimalStr);
+    std::stringstream ss;
 
-    return hexadecimal;
+    ss << std::hex << std::setw(8) << std::setfill('0') << static_cast<unsigned int>(decimal_value);
+    return ss.str();
 }
 
 std::string decimalToReversedHex(const std::string& decimalStr, int order = 2) {
@@ -368,17 +369,14 @@ bool hexEditCustOffset(const std::string& filePath, const size_t offsetFromCust,
 }
 
 int reversedHexToInt(const std::string& hex_str) {
-    std::string reversedHex;
-    reversedHex.reserve(hex_str.size());
+    uint32_t result = 0;
+    int len = hex_str.length();
 
-    for (int i = hex_str.length() - 2; i >= 0; i -= 2) {
-        reversedHex += hex_str.substr(i, 2);
+    for (int i = 0; i < len; i += 2) {
+        char byte_str[] = { hex_str[len - 2 - i], hex_str[len - 1 - i], '\0' };
+        uint32_t byte_value = std::strtoul(byte_str, nullptr, 16);
+        result = (result << 8) | byte_value;
     }
-    std::istringstream iss(reversedHex);
-    iss >> std::hex;
 
-    int result;
-    iss >> result;
-
-    return result;
+    return static_cast<int32_t>(result);
 }

@@ -210,9 +210,7 @@ public:
             // Extract the substring up to the fourth slash
             helpPath = filePath.substr(0, fifthSlashPos);
             if (!specificKey.empty()) {
-                menuName = specificKey;
-                removeLastNumericWord(menuName);
-                helpPath += "/Help/" + getNameFromPath(filePath) + "/" + menuName + ".txt";
+                helpPath += "/Help/" + getNameFromPath(filePath) + "/" + specificKey + ".txt";
             } else {
                 helpPath += "/Help/" + getNameFromPath(filePath) + ".txt";
             }
@@ -805,14 +803,28 @@ public:
 
     auto addSliderItem(auto& sliderOption)
     {
+        bool has_zero = false;
+        std::string slider_prompt = ""; // temp insert
         const std::string& sliderName = sliderOption[1];
         const int low  = std::stoi(sliderOption[2]);
         const int high = std::stoi(sliderOption[3]);
         const int step = std::stoi(sliderOption[4]);
         const std::string& offset = sliderOption[5];
+        if (sliderOption.size() > 6 && sliderOption[6] == "has_zero") {
+            has_zero = true;
+        }
+        else if (sliderOption.size() > 6) {
+            slider_prompt = sliderOption[6];
+        }
         std::vector<std::string> myArray;
         const std::string CUST = "43555354";
         std::string header;
+        int initProgress;
+
+        if (has_zero) {
+            header = sliderName + std::to_string(0);
+            myArray.push_back(header);
+        }
 
         for (int i = low; i <= high; i = i + step) {
             header = sliderName + std::to_string(i);
@@ -820,17 +832,32 @@ public:
         }
 
         myArray.shrink_to_fit();
-        auto slider = new tsl::elm::NamedStepTrackBar(" ",myArray);
+        auto slider = new tsl::elm::NamedStepTrackBar(" ",myArray,slider_prompt);
 
         std::string currentHex = readHexDataAtOffset("/atmosphere/kips/loader.kip", CUST, std::stoul(offset), 4);
 
-        int initProgress = (reversedHexToInt(currentHex) - low)/step;
+        if (has_zero && reversedHexToInt(currentHex) == 0) {
+            initProgress = 0;
+        } else if (has_zero) {
+            initProgress = ((reversedHexToInt(currentHex) - low)/step) + 1;
+        } else {
+            initProgress = (reversedHexToInt(currentHex) - low)/step;
+        }
 
         slider->setProgress(initProgress);
 
-        slider->setClickListener([this, slider, offset, low, step](uint64_t keys) { // Add 'command' to the capture list
+        slider->setClickListener([this, slider, offset, low, step, has_zero](uint64_t keys) { // Add 'command' to the capture list
             if (keys & KEY_A) {
-                int value = low + (step * slider->getProgressStep());
+                int value;
+                if (has_zero) {
+                    if (slider->getProgressStep() == 0) {
+                        value = 0;
+                    } else {
+                        value = low + (step * (slider->getProgressStep()-1));
+                    }
+                } else {
+                    value = low + (step * slider->getProgressStep());
+                }
                 auto hexData = decimalToReversedHex(std::to_string(value));
                 hexEditCustOffset("/atmosphere/kips/loader.kip", std::stoul(offset), hexData);
                 slider->setColor(tsl::PredefinedColors::Green);
