@@ -879,73 +879,7 @@ public:
             return false;
         });
         return slider;
-    }
-
-    std::string findCurrentKip(const std::string& jsonPath, const std::string& offset)
-    {
-        std::string searchKey;
-        const char* valueStr;
-
-        auto jsonData = readJsonFromFile(jsonPath);
-        if (jsonData && json_is_array(jsonData)) {
-            size_t arraySize = json_array_size(jsonData);
-            if (arraySize < 2) {
-                return "\u25B6";
-            }
-            json_t* item = json_array_get(jsonData, 1);
-            if (item && json_is_object(item)) {
-                json_t* hexValue = json_object_get(item, "hex");
-                json_t* decValue = json_object_get(item, "dec");
-                int hexLength = 0;
-                if ((hexValue && json_is_string(hexValue))) {
-                    valueStr = json_string_value(hexValue);
-                    searchKey = "hex";
-                    hexLength = strlen(valueStr) / 2;
-                    hexLength = std::max(hexLength, 1);
-                } else if ((decValue && json_is_string(decValue))) {
-                    valueStr = json_string_value(decValue);
-                    searchKey = "dec";
-                    hexLength = 4;
-                } else {
-                    return "\u25B6";
-                }
-                std::string currentHex;
-                try {
-                    const std::string CUST = "43555354";
-                    if (!kipFile) {
-                        kipFile = openFile("/atmosphere/kips/loader.kip");
-                        custOffset = findCustOffset(kipFile);
-                    }
-                    currentHex = readHexDataAtOffset(kipFile, CUST, std::stoul(offset), hexLength, custOffset);
-                } catch (const std::invalid_argument& ex) {
-                    log("ERROR - %s:%d - invalid offset value: \"%s\" in \"%s\"", __func__, __LINE__, offset.c_str(), jsonPath.c_str());
-                }
-                if (!currentHex.empty()) {
-                    if (searchKey == "dec") {
-                        currentHex = std::to_string(reversedHexToInt(currentHex));
-                    }
-                    for (size_t i = 0; i < arraySize; ++i) {
-                        json_t* item = json_array_get(jsonData, i);
-                        if (item && json_is_object(item)) {
-                            json_t* searchItem = json_object_get(item, searchKey.c_str());
-                            if (searchItem && json_is_string(searchItem)) {
-                                if (json_string_value(searchItem) == currentHex) {
-                                    json_t* name = json_object_get(item, "name");
-                                    std::string cur_name = json_string_value(name);
-                                    size_t footer_pos = cur_name.find(" - ");
-                                    if (footer_pos != std::string::npos) {
-                                        cur_name.resize(footer_pos);
-                                    }
-                                    return cur_name;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return "\u25B6";
-    }
+    } 
 
     std::string findCurrentIni(const std::string& jsonPath, const std::string& iniPath, const std::string& section, const std::string& key)
     {
@@ -1222,9 +1156,13 @@ public:
                 }
                 for (const auto& cmd : option.second) {
                     if ((cmd[0] == "json_mark_cur_kip") && showCurInMenu) {
+                        if (!kipFile) {
+                            kipFile = openFile("/atmosphere/kips/loader.kip");
+                            custOffset = findCustOffset(kipFile);
+                        }
                         auto& offset = cmd[3];
                         std::string jsonPath = preprocessPath(cmd[1]);
-                        listItem->setValue(findCurrentKip(jsonPath, offset));
+                        listItem->setValue(findCurrentKip(jsonPath, offset, kipFile, custOffset));
                     }
                     if ((cmd[0] == "json_mark_cur_ini") && showCurInMenu) {
                         std::string sourceIni = preprocessPath(cmd[3]);
