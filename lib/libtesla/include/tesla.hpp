@@ -2677,16 +2677,16 @@ namespace tsl {
                 renderer->drawRect(this->getX(), this->getY(), this->getWidth() , 1, a(tsl::style::color::ColorFrame));
                 renderer->drawRect(this->getX(), this->getBottomBound(), this->getWidth(), 1, a(tsl::style::color::ColorFrame));
 
-                renderer->drawString(this->m_icon, false, this->getX() + 15, this->getY() + 50, 23, a(tsl::style::color::ColorText));
+                renderer->drawString(this->m_icon, false, this->getX() + 15, this->getY() + baseY, 23, a(tsl::style::color::ColorText));
 
                 u16 handlePos = (this->getWidth() - 20) * static_cast<float>(this->m_value) / 100;
-                renderer->drawCircle(this->getX() + 10, this->getY() + 42, 2, true, a(tsl::style::color::ColorHighlight));
-                renderer->drawCircle(this->getX() + 10 + this->getWidth(), this->getY() + 42, 2, true, a(tsl::style::color::ColorFrame));
-                renderer->drawRect(this->getX() + 10 + handlePos, this->getY() + 40, this->getWidth() - handlePos, 5, a(tsl::style::color::ColorFrame));
-                renderer->drawRect(this->getX() + 10, this->getY() + 40, handlePos, 5, a(tsl::style::color::ColorHighlight));
+                renderer->drawCircle(this->getX() + 10, this->getY() + (baseY+2), 2, true, a(tsl::style::color::ColorHighlight));
+                renderer->drawCircle(this->getX() + 10 + this->getWidth(), this->getY() + (baseY+2), 2, true, a(tsl::style::color::ColorFrame));
+                renderer->drawRect(this->getX() + 10 + handlePos, this->getY() + baseY, this->getWidth() - handlePos, 5, a(tsl::style::color::ColorFrame));
+                renderer->drawRect(this->getX() + 10, this->getY() + baseY, handlePos, 5, a(tsl::style::color::ColorHighlight));
 
-                renderer->drawCircle(this->getX() + 10 + handlePos, this->getY() + 42, 10, true, a(tsl::style::color::ColorHandle));
-                renderer->drawCircle(this->getX() + 10 + handlePos, this->getY() + 42, 10, true, a(tsl::style::color::ColorError));
+                renderer->drawCircle(this->getX() + 10 + handlePos, this->getY() + (baseY+2), 10, true, a(tsl::style::color::ColorHandle)); 
+                renderer->drawCircle(this->getX() + 10 + handlePos, this->getY() + (baseY+2), 10, true, a(tsl::style::color::ColorError));
             }
 
             virtual void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
@@ -2742,7 +2742,7 @@ namespace tsl {
                 }
 
                 for (u8 i = 12; i <= 15; i++) {
-                    renderer->drawCircle(this->getX() + 10 + x + handlePos, this->getY() + 42 + y, i, true, a(highlightColor));
+                    renderer->drawCircle(this->getX() + 10 + x + handlePos, this->getY() + (baseY+2) + y, i, true, a(highlightColor));
                 }
             }
 
@@ -2779,6 +2779,7 @@ namespace tsl {
             const char *m_icon = nullptr;
             s16 m_value = 0;
             bool m_interactionLocked = false;
+            int baseY = 60;
 
             std::function<void(u8)> m_valueChangedListener = [](u8){};
         };
@@ -2918,20 +2919,29 @@ namespace tsl {
             NamedStepTrackBar(const char icon[3], std::initializer_list<std::string> stepDescriptions)
                 : StepTrackBar(icon, stepDescriptions.size()), m_stepDescriptions(stepDescriptions.begin(), stepDescriptions.end()) { }
 
+            NamedStepTrackBar(const char icon[3], const std::vector<std::string>& stepDescriptions, const std::string prompt)
+                : StepTrackBar(icon, stepDescriptions.size()), m_stepDescriptions(stepDescriptions), m_prompt(prompt) { }
+
+            NamedStepTrackBar(const char icon[3], std::initializer_list<std::string> stepDescriptions, const std::string prompt)
+                : StepTrackBar(icon, stepDescriptions.size()), m_stepDescriptions(stepDescriptions.begin(), stepDescriptions.end()), m_prompt(prompt) { }
+
             virtual ~NamedStepTrackBar() {}
 
             virtual void draw(gfx::Renderer *renderer) override {
 
-                std::string helpSlider = "Press \uE0E0 to apply.";
-                auto [descWidth1, descHeight1] = renderer->drawString(helpSlider.c_str(), false, 0, 0, 19, tsl::style::color::ColorTransparent);
-                renderer->drawString(helpSlider.c_str(), false, ((this->getX() + 50) + (this->getWidth() - 95) / 2) - (descWidth1 / 2), this->getY()+ 75, 19, a(tsl::Color(0xA, 0xA, 0xA, 0xF)));
+                // std::string helpSlider = "Press \uE0E0 to apply.";
+                if (!this->m_prompt.empty()) {
+                    this->baseY = 45;
+                    auto [descWidth1, descHeight1] = renderer->drawString(this->m_prompt.c_str(), false, 0, 0, 19, tsl::style::color::ColorTransparent);
+                    renderer->drawString(this->m_prompt.c_str(), false, ((this->getX() + 50) + (this->getWidth() - 95) / 2) - (descWidth1 / 2), this->getY()+ 75, 19, a(tsl::Color(0xA, 0xA, 0xA, 0xF)));
+                }
 
                 // u8 currentDescIndex = std::clamp(this->m_value / (100 / (this->m_numSteps - 1)), 0, this->m_numSteps - 1);
 
                 u8 currentDescIndex = this->currentStep;
                 auto [descWidth, descHeight] = renderer->drawString(this->m_stepDescriptions[currentDescIndex].c_str(), false, 0, 0, 19, tsl::style::color::ColorTransparent);
 
-                renderer->drawString(this->m_stepDescriptions[currentDescIndex].c_str(), false, ((this->getX() + 50) + (this->getWidth() - 95) / 2) - (descWidth / 2), this->getY() + 25, 19, a(textColor));
+                renderer->drawString(this->m_stepDescriptions[currentDescIndex].c_str(), false, ((this->getX() + 50) + (this->getWidth() - 95) / 2) - (descWidth / 2), this->getY() + (baseY-20), 19, a(textColor));
 
                 StepTrackBar::draw(renderer);
             }
@@ -2988,6 +2998,7 @@ namespace tsl {
 
         protected:
             std::vector<std::string> m_stepDescriptions;
+            std::string m_prompt = "";
             Color textColor = tsl::Color(0xF, 0xF, 0xF, 0xF);
         };
 

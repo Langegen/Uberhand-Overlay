@@ -33,9 +33,7 @@ std::string asciiToHex(const std::string& asciiStr)
 std::string decimalToHex(const std::string& decimalStr)
 {
     // assumes the decimal is a 32-bit integer
-    std::string hexadecimal = (std::stringstream {} << std::hex << std::setw(8) << std::setfill('0') << std::stoi(decimalStr)).str();
-
-    return hexadecimal;
+    return (std::stringstream {} << std::hex << std::setw(8) << std::setfill('0') << std::stoi(decimalStr)).str();
 }
 
 std::string decimalToReversedHex(const std::string& decimalStr, int order = 2)
@@ -379,19 +377,84 @@ bool hexEditCustOffset(const std::string& filePath, const size_t offsetFromCust,
     return true;
 }
 
-int reversedHexToInt(const std::string& hex_str)
-{
-    std::string reversedHex;
-    reversedHex.reserve(hex_str.size());
+int reversedHexToInt(const std::string& hex_str) {
+    uint32_t result = 0;
+    int len = hex_str.length();
 
-    for (int i = hex_str.length() - 2; i >= 0; i -= 2) {
-        reversedHex += hex_str.substr(i, 2);
+    for (int i = 0; i < len; i += 2) {
+        char byte_str[] = { hex_str[len - 2 - i], hex_str[len - 1 - i], '\0' };
+        uint32_t byte_value = std::strtoul(byte_str, nullptr, 16);
+        result = (result << 8) | byte_value;
     }
-    std::istringstream iss(reversedHex);
-    iss >> std::hex;
 
-    int result;
-    iss >> result;
+    return static_cast<int32_t>(result);
+}
 
-    return result;
+std::string findCurrentKip(const std::string& jsonPath, const std::string& offset, FILE* kipFile, int custOffset)
+{
+    std::string searchKey;
+    const char* valueStr;
+    auto jsonData = readJsonFromFile(jsonPath);
+    
+    if (jsonData && json_is_array(jsonData)) {
+        log("jsonData is gotten");
+        size_t arraySize = json_array_size(jsonData);
+        log("arraySize = %ld", arraySize);
+        if (arraySize < 2) {
+            return "\u25B6";
+        }
+        json_t* item = json_array_get(jsonData, 1);
+        if (item && json_is_object(item)) {
+            json_t* hexValue = json_object_get(item, "hex");
+            json_t* decValue = json_object_get(item, "dec");
+            int hexLength = 0;
+            if (hexValue) {log("hexvalue");}
+            if (decValue) {log("decValue");}
+            if ((hexValue && json_is_string(hexValue))) {
+                valueStr = json_string_value(hexValue);
+                searchKey = "hex";
+                hexLength = strlen(valueStr) / 2;
+                hexLength = std::max(hexLength, 1);
+            } else if ((decValue && json_is_string(decValue))) {
+                valueStr = json_string_value(decValue);
+                searchKey = "dec";
+                hexLength = 4;
+            } else {
+                return "\u25B6";
+            }
+            log("hexLength = %d", hexLength);
+            log("searchKey = %s", searchKey.c_str());
+            std::string currentHex;
+            try {
+                const std::string CUST = "43555354";
+                currentHex = readHexDataAtOffset(kipFile, CUST, std::stoul(offset), hexLength, custOffset);
+            } catch (const std::invalid_argument& ex) {
+                log("ERROR - %s:%d - invalid offset value: \"%s\" in \"%s\"", __func__, __LINE__, offset.c_str(), jsonPath.c_str());
+            }
+            log("currentHex = %s", currentHex.c_str());
+            if (!currentHex.empty()) {
+                if (searchKey == "dec") {
+                    currentHex = std::to_string(reversedHexToInt(currentHex));
+                }
+                for (size_t i = 0; i < arraySize; ++i) {
+                    json_t* item = json_array_get(jsonData, i);
+                    if (item && json_is_object(item)) {
+                        json_t* searchItem = json_object_get(item, searchKey.c_str());
+                        if (searchItem && json_is_string(searchItem)) {
+                            if (json_string_value(searchItem) == currentHex) {
+                                json_t* name = json_object_get(item, "name");
+                                std::string cur_name = json_string_value(name);
+                                size_t footer_pos = cur_name.find(" - ");
+                                if (footer_pos != std::string::npos) {
+                                    cur_name.resize(footer_pos);
+                                }
+                                return cur_name;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return "\u25B6";
 }

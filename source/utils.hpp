@@ -756,12 +756,12 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
     std::string name = "";
     std::string offsetStr = "";
     std::string increment = "";
+    std::string ref = "";
     bool allign = false;
-    int checkDefault = 0;
     size_t length = 0;
     int lineCount = 1;
     bool tableShiftMode = false;
-    int tableState;
+    int tableState = 0;
     std::vector<std::string> baseList;
     std::vector<std::string> baseIncList;
 
@@ -837,6 +837,7 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                         json_t* j_state = json_object_get(item, "state");
                         json_t* j_increment = json_object_get(item, "increment");
                         json_t* j_prefix = json_object_get(item, "prefix");
+                        json_t* j_ref = json_object_get(item, "ref");
 
                         if (j_state) {
                             state = json_string_value(j_state);
@@ -875,15 +876,6 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                 current.pop_back();
                                 output += name + ": " + current;
                             } else {
-                                json_t* j_default = json_object_get(item, "default");
-                                if (j_default) {
-                                    checkDefault = std::stoi(json_string_value(j_default));
-                                    if (checkDefault == 1) {
-                                        size_t offsetDef = custOffset + std::stoul(offsetStr) + length;
-                                        currentHex = readHexDataAtOffsetF(file, offsetDef, length); // Read next <length> hex chars from specified offset
-                                    }
-                                }
-
                                 if (allign) {
                                     // Format the string to have two columns; Calculate number of spaces needed
                                     size_t found = output.rfind('\n');
@@ -895,21 +887,25 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                     allign = false;
                                 }
 
-                                if (checkDefault && currentHex != "000000") {
-                                    output += name + ": " + "Default";
-                                    extent = "";
-                                    checkDefault = 0;
-                                } else {
-                                    if (tableShiftMode) {
-                                        //log(std::to_string(std::stoi(baseList[tableState]) + (std::stoi(offset) * std::stoi(baseIncList[tableState]))));
-                                        const size_t findFreq = std::stoi(baseList[tableState]) + (std::stoul(offsetStr) * std::stoi(baseIncList[tableState]));
-                                        const size_t offset = custOffset + findFreq;
+                                if (tableShiftMode) {
+                                    //log(std::to_string(std::stoi(baseList[tableState]) + (std::stoi(offset) * std::stoi(baseIncList[tableState]))));
+                                    const size_t findFreq = std::stoi(baseList[tableState]) + (std::stoul(offsetStr) * std::stoi(baseIncList[tableState]));
+                                    const size_t offset = custOffset + findFreq;
+                                    if (!j_ref) {
                                         currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
                                     } else {
+                                        currentHex = findCurrentKip(preprocessPath(ref), std::to_string(offset), file, custOffset);
+                                    }
+                                } else {
+                                    if (!j_ref) {
                                         const size_t offset = custOffset + std::stoul(offsetStr);
                                         currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
+                                    } else {
+                                        currentHex = findCurrentKip(preprocessPath(ref), offsetStr, file, custOffset);
                                     }
-                                    unsigned int intValue = reversedHexToInt(currentHex);
+                                }
+                                if (!j_ref) {
+                                    int intValue = reversedHexToInt(currentHex);
                                     if (j_increment) { // Add increment value from the JSON to the displayed value
                                         intValue += std::stoi(json_string_value(j_increment));
                                     }
@@ -921,8 +917,11 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                     } else {
                                         output += name + ": " + std::to_string(intValue);
                                     }
-                                    if (state == "check_extent" && intValue < 100)
+                                    if (state == "check_extent" && intValue < 100) {
                                         extent = "";
+                                    }
+                                } else {
+                                    output += name + ": " + currentHex;
                                 }
                             }
 

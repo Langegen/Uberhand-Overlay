@@ -223,9 +223,7 @@ public:
             // Extract the substring up to the fourth slash
             helpPath = filePath.substr(0, fifthSlashPos);
             if (!specificKey.empty()) {
-                menuName = specificKey;
-                removeLastNumericWord(menuName);
-                helpPath += "/Help/" + getNameFromPath(filePath) + "/" + menuName + ".txt";
+                helpPath += "/Help/" + getNameFromPath(filePath) + "/" + specificKey + ".txt";
             } else {
                 helpPath += "/Help/" + getNameFromPath(filePath) + ".txt";
             }
@@ -796,14 +794,30 @@ public:
 
     auto addSliderItem(auto& sliderOption)
     {
+        bool has_zero = false;
+        std::string slider_prompt = ""; // temp insert
         const std::string& sliderName = sliderOption[1];
         const int low = std::stoi(sliderOption[2]);
         const int high = std::stoi(sliderOption[3]);
         const int step = std::stoi(sliderOption[4]);
         const std::string& offset = sliderOption[5];
+        if (sliderOption.size() > 6 && sliderOption[6] == "has_zero") {
+            has_zero = true;
+            if (sliderOption.size() > 7) {
+                slider_prompt = sliderOption[7];
+            }
+        } else if (sliderOption.size() > 6) {
+            slider_prompt = sliderOption[6];
+        }
         std::vector<std::string> myArray;
         const std::string CUST = "43555354";
         std::string header;
+        int initProgress;
+
+        if (has_zero) {
+            header = sliderName + std::to_string(0);
+            myArray.push_back(header);
+        }
 
         for (int i = low; i <= high; i = i + step) {
             header = sliderName + std::to_string(i);
@@ -811,17 +825,32 @@ public:
         }
 
         myArray.shrink_to_fit();
-        auto slider = new tsl::elm::NamedStepTrackBar(" ", myArray);
+        auto slider = new tsl::elm::NamedStepTrackBar(" ",myArray,slider_prompt);
 
         std::string currentHex = readHexDataAtOffset("/atmosphere/kips/loader.kip", CUST, std::stoul(offset), 4);
 
-        int initProgress = (reversedHexToInt(currentHex) - low) / step;
+        if (has_zero && reversedHexToInt(currentHex) == 0) {
+            initProgress = 0;
+        } else if (has_zero) {
+            initProgress = ((reversedHexToInt(currentHex) - low)/step) + 1;
+        } else {
+            initProgress = (reversedHexToInt(currentHex) - low)/step;
+        }
 
         slider->setProgress(initProgress);
 
-        slider->setClickListener([this, slider, offset, low, step](uint64_t keys) { // Add 'command' to the capture list
+        slider->setClickListener([this, slider, offset, low, step, has_zero](uint64_t keys) { // Add 'command' to the capture list
             if (keys & KEY_A) {
-                int value = low + (step * slider->getProgressStep());
+                int value;
+                if (has_zero) {
+                    if (slider->getProgressStep() == 0) {
+                        value = 0;
+                    } else {
+                        value = low + (step * (slider->getProgressStep()-1));
+                    }
+                } else {
+                    value = low + (step * slider->getProgressStep());
+                }
                 auto hexData = decimalToReversedHex(std::to_string(value));
                 hexEditCustOffset("/atmosphere/kips/loader.kip", std::stoul(offset), hexData);
                 slider->setColor(tsl::PredefinedColors::Green);
@@ -832,73 +861,7 @@ public:
             return false;
         });
         return slider;
-    }
-
-    std::string findCurrentKip(const std::string& jsonPath, const std::string& offset)
-    {
-        std::string searchKey;
-        const char* valueStr;
-
-        auto jsonData = readJsonFromFile(jsonPath);
-        if (jsonData && json_is_array(jsonData)) {
-            size_t arraySize = json_array_size(jsonData);
-            if (arraySize < 2) {
-                return "\u25B6";
-            }
-            json_t* item = json_array_get(jsonData, 1);
-            if (item && json_is_object(item)) {
-                json_t* hexValue = json_object_get(item, "hex");
-                json_t* decValue = json_object_get(item, "dec");
-                int hexLength = 0;
-                if ((hexValue && json_is_string(hexValue))) {
-                    valueStr = json_string_value(hexValue);
-                    searchKey = "hex";
-                    hexLength = strlen(valueStr) / 2;
-                    hexLength = std::max(hexLength, 1);
-                } else if ((decValue && json_is_string(decValue))) {
-                    valueStr = json_string_value(decValue);
-                    searchKey = "dec";
-                    hexLength = 4;
-                } else {
-                    return "\u25B6";
-                }
-                std::string currentHex;
-                try {
-                    const std::string CUST = "43555354";
-                    if (!kipFile) {
-                        kipFile = openFile("/atmosphere/kips/loader.kip");
-                        custOffset = findCustOffset(kipFile);
-                    }
-                    currentHex = readHexDataAtOffset(kipFile, CUST, std::stoul(offset), hexLength, custOffset);
-                } catch (const std::invalid_argument& ex) {
-                    log("ERROR - %s:%d - invalid offset value: \"%s\" in \"%s\"", __func__, __LINE__, offset.c_str(), jsonPath.c_str());
-                }
-                if (!currentHex.empty()) {
-                    if (searchKey == "dec") {
-                        currentHex = std::to_string(reversedHexToInt(currentHex));
-                    }
-                    for (size_t i = 0; i < arraySize; ++i) {
-                        json_t* item = json_array_get(jsonData, i);
-                        if (item && json_is_object(item)) {
-                            json_t* searchItem = json_object_get(item, searchKey.c_str());
-                            if (searchItem && json_is_string(searchItem)) {
-                                if (json_string_value(searchItem) == currentHex) {
-                                    json_t* name = json_object_get(item, "name");
-                                    std::string cur_name = json_string_value(name);
-                                    size_t footer_pos = cur_name.find(" - ");
-                                    if (footer_pos != std::string::npos) {
-                                        cur_name.resize(footer_pos);
-                                    }
-                                    return cur_name;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return "\u25B6";
-    }
+    } 
 
     std::string findCurrentIni(const std::string& jsonPath, const std::string& iniPath, const std::string& section, const std::string& key)
     {
@@ -1175,9 +1138,13 @@ public:
                 }
                 for (const auto& cmd : option.second) {
                     if ((cmd[0] == "json_mark_cur_kip") && showCurInMenu) {
+                        if (!kipFile) {
+                            kipFile = openFile("/atmosphere/kips/loader.kip");
+                            custOffset = findCustOffset(kipFile);
+                        }
                         auto& offset = cmd[3];
                         std::string jsonPath = preprocessPath(cmd[1]);
-                        listItem->setValue(findCurrentKip(jsonPath, offset));
+                        listItem->setValue(findCurrentKip(jsonPath, offset, kipFile, custOffset));
                     }
                     if ((cmd[0] == "json_mark_cur_ini") && showCurInMenu) {
                         std::string sourceIni = preprocessPath(cmd[3]);
