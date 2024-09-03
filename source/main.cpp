@@ -823,8 +823,10 @@ public:
         const std::string& offset = sliderOption[5];
         if (sliderOption.size() > 6 && sliderOption[6] == "has_zero") {
             has_zero = true;
-        }
-        else if (sliderOption.size() > 6) {
+            if (sliderOption.size() > 7) {
+                slider_prompt = sliderOption[7];
+            }
+        } else if (sliderOption.size() > 6) {
             slider_prompt = sliderOption[6];
         }
         std::vector<std::string> myArray;
