@@ -8,6 +8,7 @@ private:
     std::vector<std::string> kipInfoCommand;
     bool showBackup, hasPages;
     bool isFirstPage = true;
+	bool isJsonKipSettings = false;
     tsl::elm::List* p_list;
 
 public:
@@ -62,7 +63,12 @@ public:
         if (!showBackup) {
             textDataPair = dispCustData(kipInfoCommand[isFirstPage ? 1 : 2]);
         } else {
-            textDataPair = dispCustData(kipInfoCommand[isFirstPage ? 2 : 3], kipInfoCommand[1]);
+            if (kipInfoCommand[1].find(".json") != std::string::npos) {
+                isJsonKipSettings = true;
+                textDataPair = dispKipCustomDataFromJson(kipInfoCommand[1], isFirstPage ? 1 : 2);
+            }
+            else
+                textDataPair = dispCustData(kipInfoCommand[isFirstPage ? 2 : 3], kipInfoCommand[1]);
         }
 
         std::string textdata = textDataPair.first;
@@ -98,7 +104,12 @@ public:
             return true;
         }
         if (showBackup && (keysDown & KEY_A)) {
-            copyFileOrDirectory(this->kipInfoCommand[1], "/atmosphere/kips/loader.kip");
+             if(isJsonKipSettings) {
+                std::vector<std::string> commands = {kipInfoCommand[2], kipInfoCommand[3]};
+                setCurrentKipCustomDataFromJson(kipInfoCommand[1], commands);
+            }
+            else
+                copyFileOrDirectory(this->kipInfoCommand[1], "/atmosphere/kips/loader.kip");
             applied = true;
             tsl::goBack();
             return true;
