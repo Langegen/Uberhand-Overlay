@@ -1171,6 +1171,196 @@ tsl::PredefinedColors defineColor(const std::string& strColor)
     }
 }
 
+std::string getCurrentIniSection(const std::string& kipPath = "/atmosphere/kips/loader.kip") {
+    // Открытие файла loader.kip
+    FILE* file = fopen(kipPath.c_str(), "rb");
+    if (!file) {
+        return "0";  // Fallback без скобок
+    }
+
+    // Ищем CUST (43 55 53 54)
+    u32 custOffset = 0;
+    u8 buffer[4];
+    bool foundCust = false;
+    while (fread(buffer, 1, 4, file) == 4) {
+        if (buffer[0] == 0x43 && buffer[1] == 0x55 && buffer[2] == 0x53 && buffer[3] == 0x54) {
+            foundCust = true;
+            break;
+        }
+        custOffset++;
+        fseek(file, custOffset, SEEK_SET);
+    }
+    if (!foundCust) {
+        fclose(file);
+        return "0";
+    }
+
+    // Частота (marikoEmcMaxClock)
+    std::string freqHex = readHexDataAtOffsetF(file, custOffset + 32, 4);
+    // EMC Balance (eBAL)
+    std::string emcBalanceHex = readHexDataAtOffsetF(file, custOffset + 12352, 4);
+
+    fclose(file);
+
+    if (freqHex.empty() || emcBalanceHex.empty()) {
+        return "0";
+    }
+
+    // Частота в кГц, делим на 1000 для МГц
+    int freq = reversedHexToInt(freqHex) / 1000;
+    int emcBalance = reversedHexToInt(emcBalanceHex) & 0xFF;
+    int cl = emcBalance * 2 + 8;
+    std::string section = std::to_string(freq) + "CL" + std::to_string(cl);
+
+    // Проверка на реалистичность частоты
+    if (freq < 1000 || freq > 3000) {
+        return "0";
+    }
+
+    return section;
+}
+
+std::pair<std::string, int> dispKipIniData(const std::string& jsonPath) {
+    std::string output;
+    int lineCount = 0;
+
+    // Загрузка JSON
+    auto jsonData = readJsonFromFile(jsonPath);
+    if (!jsonData) {
+        return {"Error: JSON not found", 1};
+    }
+
+    // Получение текущей секции INI
+    auto section = getCurrentIniSection();
+
+    // Парсинг INI файла
+    auto iniData = getParsedDataFromIniFile("sdmc:/config/4IFIR/emc_timings.ini");
+    if (iniData.empty()) {
+        return {"Error: INI file is empty", 1};
+    }
+    if (iniData.count(section) == 0) {
+        return {"Error: INI section " + section + " not found", 1};
+    }
+    auto& timings = iniData[section];
+
+    // Чтение данных из loader.kip
+    FILE* file = fopen("/atmosphere/kips/loader.kip", "rb");
+    int freq = 0, eBAL = 0;
+    if (file) {
+        u32 custOffset = 0;
+        u8 buffer[4];
+        while (fread(buffer, 1, 4, file) == 4) {
+            if (buffer[0] == 0x43 && buffer[1] == 0x55 && buffer[2] == 0x53 && buffer[3] == 0x54) break;
+            custOffset++;
+            fseek(file, custOffset, SEEK_SET);
+        }
+        freq = reversedHexToInt(readHexDataAtOffsetF(file, custOffset + 32, 4)) / 1000;
+        eBAL = reversedHexToInt(readHexDataAtOffsetF(file, custOffset + 12352, 4)) & 0xFF;
+        fclose(file);
+    } else {
+        return {"Error: Failed to open loader.kip", 1};
+    }
+
+    // Группы для вывода
+    std::string headerSection, timingsSection, extendedTimingsSection;
+    int headerLines = 0, timingsLines = 0, extendedTimingsLines = 0;
+    bool alignHeader = false;
+
+    // Обработка JSON массива
+    for (size_t i = 0; i < json_array_size(jsonData); ++i) {
+        auto* item = json_array_get(jsonData, i);
+        if (!item || !json_is_object(item)) continue;
+
+        const char* name = json_string_value(json_object_get(item, "name"));
+        const char* key = json_string_value(json_object_get(item, "key"));
+        const char* extent = json_string_value(json_object_get(item, "extent"));
+        const char* fillerBefore = json_string_value(json_object_get(item, "filler_before"));
+        const char* pairKey = json_string_value(json_object_get(item, "pair_key"));
+        const char* category = json_string_value(json_object_get(item, "category"));
+        const char* state = json_string_value(json_object_get(item, "state"));
+
+        if (!name || !key || !category) continue;
+
+        // Получение значения
+        std::string value;
+        if (strcmp(key, "frequency") == 0) {
+            value = std::to_string(freq);
+        } else if (strcmp(key, "eBAL") == 0) {
+            value = std::to_string(eBAL);
+        } else {
+            value = timings.count(key) && !timings[key].empty() ? timings[key] : "N/A";
+        }
+
+        // Получение парного значения
+        std::string pairValue = pairKey && timings.count(pairKey) && !timings[pairKey].empty() ? timings[pairKey] : "N/A";
+
+        // Сборка строки
+        std::string lineText = std::string(name) + ": " + value + (pairKey ? " | " + pairValue : "") + (extent ? std::string(extent) : "");
+
+        // Специальная обработка для RAM и eBAL
+        if (strcmp(category, "RAM") == 0) {
+            if (strcmp(key, "frequency") == 0) {
+                headerSection = "RAM " + value + " MHz";
+                alignHeader = state && strcmp(state, "no_skip") == 0;
+            } else if (strcmp(key, "eBAL") == 0) {
+                headerSection += " - eBal " + value;
+            }
+            continue;
+        }
+
+        // Добавляем отступ для элементов внутри категории
+        std::string indentedLine = "  " + lineText + "\n";
+        bool filler = fillerBefore && strcmp(fillerBefore, "true") == 0;
+
+        if (strcmp(category, "Timings") == 0) {
+            if (filler && !timingsSection.empty()) {
+                timingsSection += "\n";
+                timingsLines++;
+            }
+            timingsSection += indentedLine;
+            timingsLines++;
+        } else if (strcmp(category, "Extended Timings") == 0) {
+            if (filler && !extendedTimingsSection.empty()) {
+                extendedTimingsSection += "\n";
+                extendedTimingsLines++;
+            }
+            extendedTimingsSection += indentedLine;
+            extendedTimingsLines++;
+        }
+    }
+
+    // Выравнивание headerSection
+    if (!headerSection.empty()) {
+        if (alignHeader) {
+            size_t found = output.rfind('\n');
+            if (found == std::string::npos) found = 0;
+            int numreps = 20 - (headerSection.length() - found - 1);
+            if (numreps > 0) {
+                headerSection.append(numreps, ' ');
+            }
+        }
+        headerSection += ":\n"; // Добавляем двоеточие вместо переноса строки
+        headerLines = 1;
+    }
+
+    // Собираем итоговый вывод
+    if (!headerSection.empty()) {
+        output += headerSection;
+        lineCount += headerLines;
+    }
+    if (!timingsSection.empty()) {
+        output += timingsSection; // Без заголовка Timings:
+        lineCount += timingsLines;
+    }
+    if (!extendedTimingsSection.empty()) {
+        output += "1600 MHz Timings:\n" + extendedTimingsSection;
+        lineCount += extendedTimingsLines + 1; // +1 для заголовка
+    }
+
+    return {output, lineCount};
+}
+
+
 std::pair<std::string, int> dispKipCustomDataFromJson(const std::string& jsonCustomDataPath, int pageNum = 1, bool spacing = false) {
 
     std::string output = "";
