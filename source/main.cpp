@@ -18,6 +18,7 @@ bool DownloadProcessing = false;
 bool sameKeyCombo = false;
 bool exitMT = false;
 bool Mtrun = false;
+bool isAltMenu = false;
 int errCode = -2;
 std::string progress;
 Thread threadMT;
@@ -34,11 +35,11 @@ class ConfigOverlay : public tsl::Gui {
 private:
     std::string filePath, specificKey;
     bool isInSection, inQuotes;
+    bool useAlt;
 
 public:
-    ConfigOverlay(const std::string& file, const std::string& key = "")
-        : filePath(file)
-        , specificKey(key)
+    ConfigOverlay(const std::string& file, const std::string& key = "", bool alt = false)
+        : filePath(file), specificKey(key), useAlt(alt)
     {
     }
     ~ConfigOverlay() { }
@@ -49,7 +50,7 @@ public:
         auto rootFrame = new tsl::elm::OverlayFrame(getNameFromPath(filePath), "Uberhand Config");
         auto list = new tsl::elm::List();
 
-        std::string configFile = filePath + "/" + configFileName;
+        std::string configFile = filePath + "/" + (useAlt ? "alt_config.ini" : configFileName);
 
         std::string fileContent = getFileContents(configFile);
         if (!fileContent.empty()) {
@@ -793,11 +794,14 @@ public:
 
 class SubMenu : public tsl::Gui {
 protected:
-    std::string subPath, pathReplace, pathReplaceOn, pathReplaceOff;
-
+    std::string subPath;
+    std::string configName = "config.ini";  // <-- Новый параметр
+	std::string pathReplace;
+    std::string pathReplaceOn;
+    std::string pathReplaceOff;
 public:
-    SubMenu(const std::string& path)
-        : subPath(path)
+    SubMenu(const std::string& path, const std::string& config = "config.ini")
+        : subPath(path), configName(config)
     {
     }
     ~SubMenu() { }
@@ -931,6 +935,9 @@ public:
 
         int numSlashes = count(subPath.begin(), subPath.end(), '/');
         bool integrityCheck = verifyIntegrity(subPath);
+		if (configName == "alt_config.ini" || configName == "alt_exec.ini") {
+			isAltMenu = true;
+		}
         size_t fifthSlashPos = subPath.find('/', subPath.find('/', subPath.find('/', subPath.find('/') + 1) + 1) + 1);
         bool hasHelp = false;
         std::string helpPath = "";
@@ -948,7 +955,11 @@ public:
         std::string viewPackage = package;
         std::string viewsubPath = getNameFromPath(subPath);
 
-        auto rootFrame = new tsl::elm::OverlayFrame(getNameFromPath(viewsubPath), viewPackage, "", hasHelp);
+       std::string title = getNameFromPath(viewsubPath);
+		if (isAltMenu) {
+			title += " [Alt Mode]";
+		}
+		auto rootFrame = new tsl::elm::OverlayFrame(title, viewPackage, "", hasHelp);
         auto list = new tsl::elm::List();
 
         if (!kipVersion.empty()) {
@@ -993,7 +1004,7 @@ public:
         // list->addItem(new tsl::elm::CategoryHeader("Commands"));
 
         // Load options from INI file in the subdirectory
-        std::string subConfigIniPath = subPath + "/" + configFileName;
+        std::string subConfigIniPath = subPath + "/" + configName;
         std::vector<std::pair<std::string, std::vector<std::vector<std::string>>>> options = loadOptionsFromIni(subConfigIniPath);
 
         // Package Info
@@ -1028,26 +1039,39 @@ public:
                 list->addItem(item);
                 continue;
             }
-            if (enableConfigNav && optionName[0] == '>') { // a subdirectory. add a menu item and skip to the next command
-                auto subDirectory = optionName.substr(1);
-                auto item = new tsl::elm::ListItem(subDirectory);
-                item->setValue("\u25B6", tsl::PredefinedColors::White);
-                item->setClickListener([&, subDirectory, item, helpPath](u64 keys) -> bool {
-                    if (keys & KEY_A) {
-                        if (!isDirectory(subPath + subDirectory + '/')) {
-                            item->setValue("FAIL", tsl::PredefinedColors::Red);
-                            return true;
-                        }
-                        tsl::changeTo<SubMenu>(subPath + subDirectory + '/');
-                        return true;
-                    } else if (keys & KEY_Y && !helpPath.empty()) {
-                        tsl::changeTo<HelpOverlay>(helpPath);
-                        return true;
-                    }
-                    return false;
-                });
-                list->addItem(item);
-                continue;
+
+			if (enableConfigNav && optionName[0] == '>') {
+				std::string subDirectory = optionName.substr(1);
+
+				auto item = new tsl::elm::ListItem(subDirectory);
+				item->setValue("\u25B6", tsl::PredefinedColors::White);  // Стандартный символ (треугольник)
+
+				item->setClickListener([&, subDirectory, item](u64 keys) -> bool {
+					std::string normalPath = subPath + subDirectory + "/";
+					std::string altPath = normalPath + "alt_config.ini";
+
+					if (keys & KEY_A) {
+						if (!isDirectory(normalPath)) {
+							item->setValue("\u25B6", tsl::PredefinedColors::White);
+							return true;
+						}
+						isAltMenu = false;  // Переход в обычное меню
+						tsl::changeTo<SubMenu>(normalPath);
+						return true;
+					} else if (keys & KEY_RSTICK) {
+						if (!isFileOrDirectory(altPath)) {
+							item->setValue("\u25B6", tsl::PredefinedColors::White);
+							return true;
+						}
+						isAltMenu = true;  // Переход в альтернативное меню
+						tsl::changeTo<SubMenu>(normalPath, "alt_config.ini");
+						return true;
+					}
+					return false;
+				});
+
+				list->addItem(item);
+				continue;
             } else if (optionName[0] == '*') {
                 if (option.second[0][0] == "slider_kip") {
                     useSliderItem = true;
@@ -1168,58 +1192,90 @@ public:
                     }
                 }
 
-                listItem->setClickListener([command = option.second, keyName = headerName, subPath = this->subPath, usePattern, listItem, helpPath, useSlider, footer](uint64_t keys) {
-                    if (exitMT) {
-                        // Means that commands was executed
-                        threadClose(&threadMT);
-                        exitMT = false;
-                        Mtrun = false;
+            listItem->setClickListener([&, command = option.second, keyName = headerName, subPath = this->subPath, usePattern, listItem, helpPath, useSlider, footer](uint64_t keys) {
 
-                        if (errCode == 1) {
-                            tsl::goBack();
-                            return true;
-                        }
-                    }
-                    if (!Mtrun) {
-                        if (keys & KEY_A) {
-                            if (listItem->getValue() == "APPLIED" && !prevValue.empty()) {
-                                listItem->setValue(prevValue);
-                                prevValue = "";
-                                resetValue = false;
-                            }
-                            if (usePattern) {
-                                tsl::changeTo<SelectionOverlay>(subPath, keyName, command);
-                            } else if (useSlider) {
-                                tsl::changeTo<FanSliderOverlay>(subPath, keyName, command);
-                            } else {
-                                ThreadArgs args;
-                                args.exitMT = &exitMT;
-                                args.commands = command;
-                                args.listItem = listItem;
-                                args.errCode = &errCode;
-                                args.progress = "temp";
-                                Result rc = threadCreate(&threadMT, MTinterpretAndExecute, &args, NULL, 0x10000, 0x2C, -2);
-                                if (R_FAILED(rc)) {
-                                    log("error in thread create");
-                                }
-                                Result rcs = threadStart(&threadMT);
-                                if (R_FAILED(rcs)) {
-                                    log("error in thread start");
-                                }
-                                Mtrun = true;
-                            }
-                        } else if (keys & KEY_X) {
-                            tsl::changeTo<ConfigOverlay>(subPath, keyName);
-                            return true;
-                        } else if (keys & KEY_Y && !helpPath.empty()) {
-                            tsl::changeTo<HelpOverlay>(helpPath);
-                        } else if (keys && (listItem->getValue() == "DONE" || listItem->getValue() == "FAIL")) {
-                            listItem->setValue(footer);
-                        }
-                        return false;
-                    }
-                    return false;
-                });
+					if (exitMT) {
+						threadClose(&threadMT);
+						exitMT = false;
+						Mtrun = false;
+
+						if (errCode == 1) {
+							tsl::goBack();
+							return true;
+						}
+					}
+
+					if (!Mtrun) {
+						std::vector<std::vector<std::string>> selectedCommand;
+
+						// 🔹 Если нажата кнопка RStick — загрузить команду из alt_exec.ini
+						if (keys & KEY_RSTICK) {
+							std::string altExecPath = subPath + "/" + "alt_exec.ini";
+
+							if (isFileOrDirectory(altExecPath)) {
+								auto altOptions = loadOptionsFromIni(altExecPath);
+								for (const auto& altOption : altOptions) {
+									if (altOption.first == "*" + keyName) {
+										selectedCommand = altOption.second;
+
+										// Убираем пометку Alt Mode и не добавляем её в listItem
+										// isAltMenu = true; // Больше не используем флаг для Alt Menu
+
+										break;
+									}
+								}
+							}
+						}
+
+						// 🔸 Если нажата кнопка A — использовать стандартную команду
+						else if (keys & KEY_A) {
+							selectedCommand = command;
+						}
+
+						if (!selectedCommand.empty()) {
+							if (listItem->getValue() == "APPLIED" && !prevValue.empty()) {
+								listItem->setValue(prevValue);
+								prevValue = "";
+								resetValue = false;
+							}
+
+							if (usePattern) {
+								tsl::changeTo<SelectionOverlay>(subPath, keyName, selectedCommand);
+							} else if (useSlider) {
+								tsl::changeTo<FanSliderOverlay>(subPath, keyName, selectedCommand);
+							} else {
+								ThreadArgs args;
+								args.exitMT = &exitMT;
+								args.commands = selectedCommand;
+								args.listItem = listItem;
+								args.errCode = &errCode;
+								args.progress = "temp";
+
+								Result rc = threadCreate(&threadMT, MTinterpretAndExecute, &args, NULL, 0x10000, 0x2C, -2);
+								if (R_FAILED(rc)) log("error in thread create");
+
+								Result rcs = threadStart(&threadMT);
+								if (R_FAILED(rcs)) log("error in thread start");
+
+								Mtrun = true;
+							}
+							return true;
+						}
+					}
+
+					// Остальные кнопки (X, Y и восстановление состояния)
+					if (keys & KEY_X) {
+						tsl::changeTo<ConfigOverlay>(subPath, keyName);
+						return true;
+					} else if (keys & KEY_Y && !helpPath.empty()) {
+						tsl::changeTo<HelpOverlay>(helpPath);
+					} else if (keys && (listItem->getValue() == "DONE" || listItem->getValue() == "FAIL")) {
+						listItem->setValue(footer);
+					}
+
+					return false;
+				});
+
 
                 list->addItem(listItem);
             } else {
