@@ -12,6 +12,7 @@
 #include <switch.h>
 #include <sys/stat.h>
 #include <text_funcs.hpp>
+#include <4ekate.hpp>
 
 #define SpsmShutdownMode_Normal 0
 #define SpsmShutdownMode_Reboot 1
@@ -1124,7 +1125,56 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
                 command.erase(command.begin());
                 setCurrentKipCustomDataFromJson(jsonPath, command);
             }	
+        } else if (commandName == "4ekate-stage") {
+        if (command.size() >= 2) {
+            try {
+                int stageId = std::stoi(command[1]);
+                if (stageId >= 0 && stageId < CHEKATE_STAGES_COUNT) {
+                    set4ekateStagesOffsets();
+                    bool success = patch4ekateStage(stageId);
+                    if (success) {
+                        if (listItem != nullptr) {
+                            listItem->setValue("SUCCESS");
+                        }
+                        printf("4ekate-stage %d: SUCCESS\n", stageId);
+                        return 0;
+                    } else {
+                        if (listItem != nullptr) {
+                            if (is4IFIXPresent()) {
+                                listItem->setValue("FAIL: 4IFIX is active");
+                            } else {
+                                listItem->setValue("FAIL: Patch failed");
+                            }
+                        }
+                        printf("4ekate-stage %d: FAIL (4IFIX or other error)\n", stageId);
+                        return -1;
+                    }
+                }
+            } catch (const std::exception& e) {
+                if (listItem != nullptr) {
+                    listItem->setValue("FAIL: Invalid stage ID");
+                }
+                printf("4ekate-stage: Invalid stage ID: %s\n", e.what());
+                return -1;
+            }
         }
+        if (listItem != nullptr) {
+            listItem->setValue("FAIL: Missing stage ID");
+        }
+        printf("4ekate-stage: Missing stage ID\n");
+        return -1;
+    }
+    else if (commandName == "show4ekate-stage") {
+        set4ekateStagesOffsets();
+        const char* title = getCurrentStageTitle();
+        if (listItem != nullptr) {
+            listItem->setValue(title);
+        } else {
+            printf("show4ekate-stage: listItem is null\n");
+        }
+        printf("show4ekate-stage: %s\n", title);
+        return -1; // Возвращаем -1, чтобы избежать стандартного "DONE"
+    }
         if (!progress.empty()) {
             curProgress += 100 / commands.size();
             listItem->setValue(std::to_string(curProgress) + "%", tsl::PredefinedColors::Green);
