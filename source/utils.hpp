@@ -456,7 +456,7 @@ std::string getCurrentKipCustomDataJson(const std::vector<std::string>& jsonPath
                                             const size_t offset = custOffset + std::stoul(offsetStr);
                                             currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
                                         }
-                                        unsigned int intValue = reversedHexToInt(currentHex);
+                                        int intValue = reversedHexToInt(currentHex);
                                         if (j_increment) { // Add increment value from the JSON to the displayed value
                                             intValue += std::stoi(json_string_value(j_increment));
                                         }
@@ -1507,14 +1507,14 @@ std::pair<std::string, int> dispKipCustomDataFromJson(const std::string& jsonCus
                     currentValue = "";
                     tmpValueValueVector = split (tempValue, ',');
                     for (auto &singleValue : tmpValueValueVector) {
-                        unsigned int intValue = reversedHexToInt(singleValue);
+                        int intValue = reversedHexToInt(singleValue);
                         currentValue += std::to_string(intValue) + '-';
                     }
                     currentValue.pop_back();
                 }
                 else {
                     if(tempValue.compare("") != 0) {
-                        unsigned int intValue = reversedHexToInt(tempValue);
+                        int intValue = reversedHexToInt(tempValue);
                         if (intValue > 1500) {
                             intValue = intValue/1000;
                         }
@@ -1693,7 +1693,10 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                     try {
                                         const size_t offset = custOffset + std::stoul(offsetItem);
                                         const std::string tempHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip
-                                        unsigned int intValue = reversedHexToInt(tempHex);
+                                        int intValue = reversedHexToInt(tempHex);
+										 if (j_increment) {
+											intValue += std::stoi(json_string_value(j_increment));
+										}
                                         current += std::to_string(intValue) + '-';
                                     } catch (const std::invalid_argument& ex) {
                                         log("ERROR - %s:%d - invalid offset value: \"%s\" in \"%s\"", __func__, __LINE__, offsetItem.c_str(), jsonPath.c_str());

@@ -427,7 +427,16 @@ int reversedHexToInt(const std::string& hex_str) {
         result = (result << 8) | byte_value;
     }
 
-    return static_cast<int32_t>(result);
+    // Определяем длину (в байтах)
+    int byteCount = len / 2;
+
+    // ✅ Возвращаем значение в корректном signed-формате
+    switch (byteCount) {
+        case 1: return static_cast<int8_t>(result);
+        case 2: return static_cast<int16_t>(result);
+        case 4: return static_cast<int32_t>(result);
+        default: return static_cast<int>(result); // fallback
+    }
 }
 
 std::string findCurrentKip(const std::string& jsonPath, const std::string& offset, FILE* kipFile, int custOffset)
