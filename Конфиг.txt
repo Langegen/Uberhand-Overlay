@@ -1,0 +1,5 @@
+[*eVD2]
+catch_errors
+json_mark_cur_ini '/switch/.packages/TOTK UltraCam/Configure/json/eVD2.json' name '/config/4IFIR/emc_timings.ini' {section} eVD2
+set-ini-timings '/config/4IFIR/emc_timings.ini' {section} eVD2 {json_source(*,dec)}
+back

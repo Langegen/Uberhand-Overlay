@@ -4,6 +4,7 @@
 
 #include <FanSliderOverlay.hpp>
 #include <KipInfoOverlay.hpp>
+#include <FourEkateOverlay.hpp>
 #include <switch/kernel/thread.h>
 #include <tesla.hpp>
 #include <utils.hpp>
@@ -193,90 +194,6 @@ public:
     }
 };
 
-class CustomCategoryHeader : public tsl::elm::CategoryHeader {
-private:
-    tsl::Color m_textColor;
-    bool m_hasSeparator;
-    std::vector<std::string> m_lines;
-    static constexpr size_t maxCharsPerLine = 44;
-    static constexpr s32 textSize = 15;
-    static constexpr s32 lineHeight = textSize + 3;
-    static constexpr s32 paddingLeft = 13;
-    static constexpr s32 spacing = 5;
-    static constexpr s32 paddingTop = 5;
-    bool m_showSeparator = true;
-
-    void splitText(const std::string& title) {
-        m_lines.clear();
-        std::string remaining = title;
-        while (!remaining.empty()) {
-            size_t charsToTake = std::min(maxCharsPerLine, remaining.length());
-            size_t splitPos = charsToTake;
-            if (charsToTake < remaining.length()) {
-                size_t lastSpace = remaining.find_last_of(' ', charsToTake);
-                if (lastSpace != std::string::npos && lastSpace > 0) {
-                    splitPos = lastSpace;
-                }
-            }
-            m_lines.push_back(remaining.substr(0, splitPos));
-            remaining = (splitPos < remaining.length()) ? remaining.substr(splitPos + 1) : "";
-        }
-    }
-
-public:
-    CustomCategoryHeader(const std::string& title, bool hasSeparator = false, tsl::Color textColor = tsl::style::color::ColorText)
-        : tsl::elm::CategoryHeader(title, hasSeparator), m_textColor(textColor), m_hasSeparator(hasSeparator) {
-        splitText(title);
-        m_showSeparator = readIniValue("/config/uberhand/config.ini", "uberhand", "show_separator") != "false";
-    }
-
-    void setText(const std::string& title) {
-        tsl::elm::CategoryHeader::setText(title);  // Исправленный вызов родительского метода
-        splitText(title);
-    }
-
-    void draw(tsl::gfx::Renderer* renderer) override {
-        const s32 rectX = this->getX();
-        const s32 rectY = this->getY();
-        const s32 totalTextHeight = m_lines.size() * lineHeight;
-        const s32 elementHeight = totalTextHeight + spacing + paddingTop;
-
-        // Голубая вертикальная полоса с возвращенной шириной и уменьшенной высотой
-        tsl::Color lightBlue(0x6, 0xB, 0xF, 0xF); // #66B2FF
-        renderer->drawRect(rectX - 2, rectY, 5, elementHeight - 2, renderer->a(lightBlue));
-
-        // Вычисляем yOffset для строгого центрирования текста
-        s32 yOffset = rectY + (elementHeight - totalTextHeight) / 2 + textSize;
-
-        for (const auto& line : m_lines) {
-            renderer->drawString(line.c_str(), false, rectX + paddingLeft, yOffset, textSize, renderer->a(m_textColor));
-            yOffset += lineHeight;
-        }
-
-        // Горизонтальная линия-разделитель внутри границ элемента
-        if (m_hasSeparator && m_showSeparator) {
-            renderer->drawRect(rectX, rectY + elementHeight - 1, this->getWidth(), 1, renderer->a(tsl::style::color::ColorFrame));
-        }
-    }
-
-    void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
-        this->setBoundaries(this->getX(), this->getY(), this->getWidth(), getHeight(parentWidth));
-    }
-
-    bool onClick(u64 keys) override {
-        return false;
-    }
-
-    tsl::elm::Element* requestFocus(tsl::elm::Element* oldFocus, tsl::FocusDirection direction) override {
-        return nullptr;
-    }
-
-    u16 getHeight(u16 parentWidth) const {
-        size_t lines = m_lines.empty() ? 1 : m_lines.size();
-        u16 height = static_cast<u16>(lines * lineHeight + spacing + paddingTop);
-        return height;
-    }
-};
 
 class SelectionOverlay : public tsl::Gui {
 private:
@@ -588,7 +505,7 @@ public:
             }
             parentDirName = getParentDirNameFromPath(file);
             if (useSplitHeader && (lastParentDirName.empty() || (lastParentDirName != parentDirName))) {
-                list->addItem(new CustomCategoryHeader(removeQuotes(parentDirName)));
+                list->addItem(new tsl::elm::CategoryHeader(removeQuotes(parentDirName)));
                 lastParentDirName = parentDirName;
             }
 
@@ -613,7 +530,7 @@ public:
                             jsonSep = optionName.substr(1);
                             hasSep = true;
                         } else {
-                            auto item = new CustomCategoryHeader(optionName.substr(1), true);
+                            auto item = new tsl::elm::CategoryHeader(optionName.substr(1), true);
                             list->addItem(item);
                         }
                     } else {
@@ -761,10 +678,10 @@ public:
         }
         if (hasSep) {
             if (!jsonSep.empty()) {
-                list->addItem(new CustomCategoryHeader(jsonSep), 0, 0);
+                list->addItem(new tsl::elm::CategoryHeader(jsonSep), 0, 0);
             }
         } else if (!useSplitHeader) {
-            list->addItem(new CustomCategoryHeader(specificKey), 0, 0);
+            list->addItem(new tsl::elm::CategoryHeader(specificKey), 0, 0);
         }
         rootFrame->setContent(list);
         return rootFrame;
@@ -1157,6 +1074,24 @@ public:
 
 				list->addItem(item);
 				continue;
+				} else if (optionName == "4ekate") {
+            // Обработка команды 4ekate
+            auto item = new tsl::elm::ListItem("4ekate");
+            item->setValue("\u25B6", tsl::PredefinedColors::White);
+            item->setClickListener([&, helpPath](u64 keys) -> bool {
+                if (keys & KEY_A) {
+                    // Переход к FourEkateOverlay
+                    tsl::changeTo<FourEkateOverlay>();
+                    return true;
+                } else if (keys & KEY_Y && !helpPath.empty()) {
+                    // Поддержка справки, если доступна
+                    tsl::changeTo<HelpOverlay>(helpPath);
+                    return true;
+                }
+                return false;
+            });
+            list->addItem(item);
+            continue;
             } else if (optionName[0] == '*') {
                 if (option.second[0][0] == "slider_kip") {
                     useSliderItem = true;
@@ -1216,7 +1151,7 @@ public:
             }
 
             if (isSeparator) {
-                auto item = new CustomCategoryHeader(optionName, true);
+                auto item = new tsl::elm::CategoryHeader(optionName, true);
                 list->addItem(item);
             } else if (useSliderItem) {
                 auto item = addSliderItem(option.second[0]);
@@ -1462,7 +1397,7 @@ public:
         }
 
         if ((packageSectionString != "") && (packageInfoString != "")) {
-            list->addItem(new CustomCategoryHeader("Package Info"));
+            list->addItem(new tsl::elm::CategoryHeader("Package Info"));
             list->addItem(new tsl::elm::CustomDrawer([lineHeight, xOffset, fontSize, packageSectionString, packageInfoString](tsl::gfx::Renderer* renderer, s32 x, s32 y, s32 w, s32 h) {
                               renderer->drawString(packageSectionString.c_str(), false, x, y + lineHeight, fontSize, a(tsl::style::color::ColorText));
                               renderer->drawString(packageInfoString.c_str(), false, x + xOffset, y + lineHeight, fontSize, a(tsl::style::color::ColorText));
@@ -1478,7 +1413,7 @@ public:
                 charArray[i] = static_cast<char>(headerCh[i]);
             }
             charArray[length] = '\0';
-            list->addItem(new CustomCategoryHeader(charArray));
+            list->addItem(new tsl::elm::CategoryHeader(charArray));
             int checksum[] = { 83, 112, 101, 99, 105, 97, 108, 32, 116, 104, 97, 110, 107, 115, 32, 116, 111, 32, 69, 102, 111, 115, 97, 109, 97, 114, 107, 44, 32, 73, 114, 110, 101, 32, 97, 110, 100, 32, 73, 51, 115, 101, 121, 46, 10, 87, 105, 116, 104, 111, 117, 116, 32, 116, 104, 101, 109, 32, 116, 104, 105, 115, 32, 119, 111, 117, 108, 100, 110, 39, 116, 32, 98, 101, 32, 112, 111, 115, 115, 98, 108, 101, 33 };
             length = sizeof(checksum) / sizeof(checksum[0]);
             charArray = new char[length + 1];
@@ -2070,7 +2005,7 @@ public:
                     });
 
                     if (count == 0) {
-                        list->addItem(new CustomCategoryHeader("Overlays"));
+                        list->addItem(new tsl::elm::CategoryHeader("Overlays"));
                     }
                     list->addItem(listItem);
                     count++;
@@ -2079,7 +2014,7 @@ public:
 
             //ovl updater section
             if (overlayUpdater) {
-                list->addItem(new CustomCategoryHeader("Updater", true));
+                list->addItem(new tsl::elm::CategoryHeader("Updater", true));
                 auto updaterItem = new tsl::elm::ListItem("Check for Overlay Updates");
                 updaterItem->setClickListener([this, updaterItem](uint64_t keys) {
                     if (keys & KEY_A) {
@@ -2209,7 +2144,7 @@ public:
                     PackageHeader packageHeader = getPackageHeaderFromIni(subPath + configFileName);
                     if (count == 0) {
                         // Add a section break with small text to indicate the "Packages" section
-                        list->addItem(new CustomCategoryHeader("Packages"));
+                        list->addItem(new tsl::elm::CategoryHeader("Packages"));
                     }
 
                     auto listItem = new tsl::elm::ListItem(subdirectoryIcon + subdirectory);
@@ -2279,7 +2214,7 @@ public:
 
             //package updater section
             if (packageUpdater) {
-                list->addItem(new CustomCategoryHeader("Updater", true));
+                list->addItem(new tsl::elm::CategoryHeader("Updater", true));
                 auto updaterItem = new tsl::elm::ListItem("Check for Package Updates");
                 updaterItem->setClickListener([this, subdirectories, updaterItem](uint64_t keys) {
                     if (keys & KEY_A) {
@@ -2322,11 +2257,11 @@ public:
                 fullPath = packageDirectory + optionName;
                 if (count == 0) {
                     // Add a section break with small text to indicate the "Packages" section
-                    list->addItem(new CustomCategoryHeader("Commands"));
+                    list->addItem(new tsl::elm::CategoryHeader("Commands"));
                 }
 
                 if (option.second.front()[0] == "separator") {
-                    auto item = new CustomCategoryHeader(optionName, true);
+                    auto item = new tsl::elm::CategoryHeader(optionName, true);
                     list->addItem(item);
                     continue;
                 }

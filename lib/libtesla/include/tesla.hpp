@@ -2545,52 +2545,110 @@ namespace tsl {
             std::function<void(bool)> m_stateChangedListener = [](bool){};
         };
 
-        class CategoryHeader : public Element {
-        public:
-            tsl::Color frameColor = (readIniValue("/config/uberhand/config.ini", "uberhand", "show_separator") == "false") ? tsl::style::color::ColorNoFrame : tsl::style::color::ColorFrame;
-            CategoryHeader(const std::string &title, bool hasSeparator = false) : m_text(title), m_hasSeparator(hasSeparator) {}
-            virtual ~CategoryHeader() {}
+        class CategoryHeader : public tsl::elm::Element {
+		public:
+			CategoryHeader(const std::string& title, bool hasSeparator = false, tsl::Color textColor = tsl::style::color::ColorText)
+				: m_textColor(textColor), 
+				  m_frameColor(readIniValue("/config/uberhand/config.ini", "uberhand", "show_separator") == "false" 
+					  ? tsl::style::color::ColorNoFrame : tsl::style::color::ColorFrame),
+				  m_hasSeparator(hasSeparator),
+				  m_showSeparator(readIniValue("/config/uberhand/config.ini", "uberhand", "show_separator") != "false") {
+				splitText(title);
+			}
 
-            virtual void draw(gfx::Renderer *renderer) override {
-                renderer->drawRect(this->getX() - 2, this->getBottomBound() - 30, 5, 23, a(tsl::style::color::ColorHeaderBar));
-                renderer->drawString(this->m_text.c_str(), false, this->getX() + 13, this->getBottomBound() - 12, 15, a(tsl::style::color::ColorText));
+			virtual ~CategoryHeader() {}
 
-                if (this->m_hasSeparator)
-                    renderer->drawRect(this->getX(), this->getBottomBound(), this->getWidth(), 1, a(frameColor));
-            }
+			void setText(const std::string& title) {
+				m_text = title;
+				splitText(title);
+			}
 
-            virtual void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
-                // Check if the CategoryHeader is part of a list and if it's the first entry in it, half it's height
-                if (List *list = dynamic_cast<List*>(this->getParent()); list != nullptr) {
-                    if (list->getIndexInList(this) == 0) {
-                        this->setBoundaries(this->getX(), this->getY(), this->getWidth(), tsl::style::ListItemDefaultHeight / 2);
-                        return;
-                    }
-                }
+			const std::string& getText() const {
+				return m_text;
+			}
 
-                this->setBoundaries(this->getX(), this->getY(), this->getWidth(), tsl::style::ListItemDefaultHeight);
-            }
+			void draw(tsl::gfx::Renderer* renderer) override {
+				const s32 rectX = this->getX();
+				const s32 rectY = this->getY();
+				const s32 totalTextHeight = m_lines.size() * lineHeight;
+				const s32 elementHeight = totalTextHeight + spacing + paddingTop;
 
-            virtual bool onClick(u64 keys) {
-                return false;
-            }
+				// Голубая вертикальная полоса с минимальными отступами
+				tsl::Color lightBlue(0x6, 0xB, 0xF, 0xF); // #66B2FF
+				renderer->drawRect(rectX - 2, rectY + 2, 5, elementHeight - 4, renderer->a(lightBlue)); // Отступ 2 сверху, 2 снизу
 
-            virtual Element* requestFocus(Element *oldFocus, FocusDirection direction) override {
-                return nullptr;
-            }
+				// Центрированный текст
+				s32 yOffset = rectY + (elementHeight - totalTextHeight) / 2 + textSize;
+				for (const auto& line : m_lines) {
+					renderer->drawString(line.c_str(), false, rectX + paddingLeft, yOffset, textSize, renderer->a(m_textColor));
+					yOffset += lineHeight;
+				}
 
-            inline void setText(const std::string &text) {
-                this->m_text = text;
-            }
+				// Горизонтальная линия-разделитель
+				if (m_hasSeparator && m_showSeparator) {
+					renderer->drawRect(rectX, rectY + elementHeight - 1, this->getWidth(), 1, renderer->a(m_frameColor));
+				}
+			}
 
-            inline const std::string& getText() const {
-                return this->m_text;
-            }
+			void layout(u16 parentX, u16 parentY, u16 parentWidth, u16 parentHeight) override {
+				// Проверка, является ли элемент первым в списке
+				if (tsl::elm::List* list = dynamic_cast<tsl::elm::List*>(this->getParent()); list != nullptr) {
+					if (list->getIndexInList(this) == 0) {
+						this->setBoundaries(this->getX(), this->getY(), this->getWidth(), tsl::style::ListItemDefaultHeight / 2);
+						return;
+					}
+				}
+				// Минимальный зазор для непервого заголовка
+				const u16 elementHeight = getHeight(parentWidth);
+				this->setBoundaries(this->getX(), this->getY(), this->getWidth(), elementHeight + 6); // +6 пикселей для зазора
+			}
 
-        private:
-            std::string m_text;
-            bool m_hasSeparator;
-        };
+			bool onClick(u64 keys) override {
+				return false;
+			}
+
+			tsl::elm::Element* requestFocus(tsl::elm::Element* oldFocus, tsl::FocusDirection direction) override {
+				return nullptr;
+			}
+
+			u16 getHeight(u16 parentWidth) const {
+				size_t lines = m_lines.empty() ? 1 : m_lines.size();
+				return static_cast<u16>(lines * lineHeight + spacing + paddingTop);
+			}
+
+		private:
+			std::string m_text;
+			tsl::Color m_textColor;
+			tsl::Color m_frameColor;
+			bool m_hasSeparator;
+			bool m_showSeparator;
+			std::vector<std::string> m_lines;
+
+			static constexpr size_t maxCharsPerLine = 44;
+			static constexpr s32 textSize = 15;
+			static constexpr s32 lineHeight = textSize + 3;
+			static constexpr s32 paddingLeft = 13;
+			static constexpr s32 spacing = 5;
+			static constexpr s32 paddingTop = 5;
+
+			void splitText(const std::string& title) {
+				m_lines.clear();
+				m_text = title;
+				std::string remaining = title;
+				while (!remaining.empty()) {
+					size_t charsToTake = std::min(maxCharsPerLine, remaining.length());
+					size_t splitPos = charsToTake;
+					if (charsToTake < remaining.length()) {
+						size_t lastSpace = remaining.find_last_of(' ', charsToTake);
+						if (lastSpace != std::string::npos && lastSpace > 0) {
+							splitPos = lastSpace;
+						}
+					}
+					m_lines.push_back(remaining.substr(0, splitPos));
+					remaining = (splitPos < remaining.length()) ? remaining.substr(splitPos + 1) : "";
+				}
+			}
+		};
 
         class CustomHeader : public Element {
         public:

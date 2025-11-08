@@ -77,6 +77,55 @@ std::vector<std::string> split (const std::string &s, char delim) {
     return result;
 }
 
+std::string getCurrentIniSection(const std::string& kipPath = "/atmosphere/kips/loader.kip") {
+    // Открытие файла loader.kip
+    FILE* file = fopen(kipPath.c_str(), "rb");
+    if (!file) {
+        return "0";  // Fallback без скобок
+    }
+
+    // Ищем CUST (43 55 53 54)
+    u32 custOffset = 0;
+    u8 buffer[4];
+    bool foundCust = false;
+    while (fread(buffer, 1, 4, file) == 4) {
+        if (buffer[0] == 0x43 && buffer[1] == 0x55 && buffer[2] == 0x53 && buffer[3] == 0x54) {
+            foundCust = true;
+            break;
+        }
+        custOffset++;
+        fseek(file, custOffset, SEEK_SET);
+    }
+    if (!foundCust) {
+        fclose(file);
+        return "0";
+    }
+
+    // Частота (marikoEmcMaxClock)
+    std::string freqHex = readHexDataAtOffsetF(file, custOffset + 32, 4);
+    // EMC Balance (eBAL)
+    std::string emcBalanceHex = readHexDataAtOffsetF(file, custOffset + 12352, 4);
+
+    fclose(file);
+
+    if (freqHex.empty() || emcBalanceHex.empty()) {
+        return "0";
+    }
+
+    // Частота в кГц, делим на 1000 для МГц
+    int freq = reversedHexToInt(freqHex) / 1000;
+    int emcBalance = reversedHexToInt(emcBalanceHex) & 0xFF;
+    int cl = emcBalance * 2 + 8;
+    std::string section = std::to_string(freq) + "CL" + std::to_string(cl);
+
+    // Проверка на реалистичность частоты
+    if (freq < 1000 || freq > 3000) {
+        return "0";
+    }
+
+    return section;
+}
+
 void setCurrentKipCustomDataFromJson(const std::string& jsonCustomDataPath, const std::vector<std::string>& jsonPathArr, const std::string& kipPath = "/atmosphere/kips/loader.kip") 
 {
 
@@ -660,44 +709,47 @@ struct ThreadArgs {
 
 // Main interpreter
 int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& commands,
-                               std::string progress = "",
-                               tsl::elm::ListItem* listItem = nullptr)
-{
+                              std::string progress = "",
+                              tsl::elm::ListItem* listItem = nullptr) {
     std::string commandName, jsonPath, sourcePath, destinationPath, desiredSection, desiredKey, desiredNewKey, desiredValue, offset, hexDataToReplace, hexDataReplacement, fileUrl, occurrence;
     bool catchErrors = false;
     int curProgress = 0;
-    for (auto& unmodifiedCommand : commands) {
 
-        // Check the command and perform the appropriate action
+    // Получаем текущую секцию один раз для всех команд
+    std::string currentSection = getCurrentIniSection();
+
+    for (auto& unmodifiedCommand : commands) {
+        // Пропускаем пустые команды
         if (unmodifiedCommand.empty()) {
-            // Empty command, do nothing
             continue;
         }
 
-        // Get the command name (first part of the command)
-        commandName = unmodifiedCommand[0];
-        //log(commandName);
-        //log(command[1]);
-
+        // Копируем команду и заменяем {section} на текущую секцию
         std::vector<std::string> command;
+        for (const auto& arg : unmodifiedCommand) {
+            if (arg == "{section}") {
+                command.push_back(currentSection == "0" ? "UnknownSection" : currentSection);
+            } else {
+                command.push_back(arg);
+            }
+        }
 
-        // Modify the command to replace {json_data} placeholder if jsonPath is available
+        // Получаем имя команды
+        commandName = command[0];
+
+        // Обработка плейсхолдера {json_data} или {json_source}
         if (!jsonPath.empty()) {
             std::vector<std::string> modifiedCommand;
-            for (const std::string& commandArg : unmodifiedCommand) {
-                if (commandArg.find("{json_data(") != std::string::npos) {
-                    // Create a copy of the string and modify it
+            for (const std::string& commandArg : command) {
+                if (commandArg.find("{json_data(") != std::string::npos || commandArg.find("{json_source(") != std::string::npos) {
                     std::string modifiedArg = commandArg;
                     modifiedArg = replaceJsonSourcePlaceholder(modifiedArg, jsonPath);
-                    // Use modifiedArg as needed
                     modifiedCommand.push_back(modifiedArg);
                 } else {
                     modifiedCommand.push_back(commandArg);
                 }
             }
             command = modifiedCommand;
-        } else {
-            command = unmodifiedCommand;
         }
 
         // if (commandName == "json-set-current") {
@@ -859,6 +911,63 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
                     log("Error in %s command", commandName.c_str());
                     return -1;
                 }
+            }
+		} else if (commandName == "set-ini-timings") {
+            // Команда для добавления одного ключа (eVD2 или eVDQ)
+            if (command.size() >= 5 && command[1] != "" && command[2] != "" && command[3] != "") {
+                sourcePath = preprocessPath(command[1]);
+                desiredSection = removeQuotes(command[2]);
+                std::string key = removeQuotes(command[3]); // eVD2 или eVDQ
+                std::string value = removeQuotes(command[4]); // Значение из JSON или прямое
+
+                // Проверка, что секция валидна
+                if (desiredSection == "UnknownSection") {
+                    log("Error in %s command: Could not determine section from loader.kip", commandName.c_str());
+                    if (listItem) listItem->setValue("FAIL: Invalid section", tsl::PredefinedColors::Red);
+                    return -1;
+                }
+
+                // Проверка, что ключ — eVD2 или eVDQ
+                if (key != "eVD2" && key != "eVDQ") {
+                    log("Error in %s command: Invalid key '%s', expected 'eVD2' or 'eVDQ'", commandName.c_str(), key.c_str());
+                    if (listItem) listItem->setValue("FAIL: Invalid key", tsl::PredefinedColors::Red);
+                    return -1;
+                }
+
+                // Валидация значения как целого числа
+                try {
+                    std::stoi(value);
+                } catch (...) {
+                    log("Error in %s command: Value '%s' for key '%s' is not an integer", commandName.c_str(), value.c_str(), key.c_str());
+                    if (listItem) listItem->setValue("FAIL: Invalid value", tsl::PredefinedColors::Red);
+                    return -1;
+                }
+
+                // Читаем существующий INI-файл
+                IniSectionInput iniData = readIniFile(sourcePath);
+                // Если файл не существует, iniData будет пустым, но это допустимо
+
+                // Добавляем или обновляем значение в секции
+                iniData[desiredSection][key] = value;
+
+                // Сохраняем изменения
+                writeIniFile(sourcePath, iniData);
+
+                // Проверка успешности записи (например, проверка существования файла)
+                FILE* fileCheck = fopen(sourcePath.c_str(), "rb");
+                bool result = (fileCheck != nullptr);
+                if (fileCheck) fclose(fileCheck);
+
+                if (!result && catchErrors) {
+                    log("Error in %s command: Failed to write to %s", commandName.c_str(), sourcePath.c_str());
+                    if (listItem) listItem->setValue("FAIL: Write error", tsl::PredefinedColors::Red);
+                    return -1;
+                }
+                if (listItem) listItem->setValue("SUCCESS", tsl::PredefinedColors::Green);
+            } else if (catchErrors) {
+                log("Error in %s command: expected at least 4 arguments, got %ld", commandName.c_str(), command.size() - 1);
+                if (listItem) listItem->setValue("FAIL: Invalid arguments", tsl::PredefinedColors::Red);
+                return -1;
             }
         } else if (commandName == "set-ini-key") {
             // Edit command
@@ -1221,54 +1330,6 @@ tsl::PredefinedColors defineColor(const std::string& strColor)
     }
 }
 
-std::string getCurrentIniSection(const std::string& kipPath = "/atmosphere/kips/loader.kip") {
-    // Открытие файла loader.kip
-    FILE* file = fopen(kipPath.c_str(), "rb");
-    if (!file) {
-        return "0";  // Fallback без скобок
-    }
-
-    // Ищем CUST (43 55 53 54)
-    u32 custOffset = 0;
-    u8 buffer[4];
-    bool foundCust = false;
-    while (fread(buffer, 1, 4, file) == 4) {
-        if (buffer[0] == 0x43 && buffer[1] == 0x55 && buffer[2] == 0x53 && buffer[3] == 0x54) {
-            foundCust = true;
-            break;
-        }
-        custOffset++;
-        fseek(file, custOffset, SEEK_SET);
-    }
-    if (!foundCust) {
-        fclose(file);
-        return "0";
-    }
-
-    // Частота (marikoEmcMaxClock)
-    std::string freqHex = readHexDataAtOffsetF(file, custOffset + 32, 4);
-    // EMC Balance (eBAL)
-    std::string emcBalanceHex = readHexDataAtOffsetF(file, custOffset + 12352, 4);
-
-    fclose(file);
-
-    if (freqHex.empty() || emcBalanceHex.empty()) {
-        return "0";
-    }
-
-    // Частота в кГц, делим на 1000 для МГц
-    int freq = reversedHexToInt(freqHex) / 1000;
-    int emcBalance = reversedHexToInt(emcBalanceHex) & 0xFF;
-    int cl = emcBalance * 2 + 8;
-    std::string section = std::to_string(freq) + "CL" + std::to_string(cl);
-
-    // Проверка на реалистичность частоты
-    if (freq < 1000 || freq > 3000) {
-        return "0";
-    }
-
-    return section;
-}
 
 std::pair<std::string, int> dispKipIniData(const std::string& jsonPath) {
     std::string output;
