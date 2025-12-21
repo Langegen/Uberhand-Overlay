@@ -1,0 +1,15 @@
+[
+  {
+    "name": "VDDQ",
+    "ini": "/config/4IFIR/emc_timings.ini",
+    "section": "auto",
+    "key": "eVDQ",
+    "prefix": "Mode: ",
+    "extent": " units"
+  },
+  {
+    "name": "GPUv offset",
+    "offset": "12448",
+    "length": "4"
+  }
+]

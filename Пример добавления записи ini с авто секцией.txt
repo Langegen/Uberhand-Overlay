@@ -1,0 +1,11 @@
+[*eVD2]
+catch_errors
+json_mark_cur_ini '/switch/.packages/4Wizard/4Advanced/4IFIR Optimised/json/Vdd2.json' name '/config/4IFIR/emc_timings.ini' {section} eVD2
+set-ini-val '/config/4IFIR/emc_timings.ini' {auto} +eVD2 {json_source(*,dec)}
+back
+
+[*eVDQ]
+catch_errors
+json_mark_cur_ini '/switch/.packages/4Wizard/4Advanced/4IFIR Optimised/json/Vddq.json' name '/config/4IFIR/emc_timings.ini' {section} eVDQ
+set-ini-val '/config/4IFIR/emc_timings.ini' {auto} +eVDQ {json_source(*,dec)}
+back

@@ -709,8 +709,8 @@ struct ThreadArgs {
 
 // Main interpreter
 int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& commands,
-                              std::string progress = "",
-                              tsl::elm::ListItem* listItem = nullptr) {
+                               std::string progress = "",
+                               tsl::elm::ListItem* listItem = nullptr) {
     std::string commandName, jsonPath, sourcePath, destinationPath, desiredSection, desiredKey, desiredNewKey, desiredValue, offset, hexDataToReplace, hexDataReplacement, fileUrl, occurrence;
     bool catchErrors = false;
     int curProgress = 0;
@@ -720,14 +720,12 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
 
     for (auto& unmodifiedCommand : commands) {
         // Пропускаем пустые команды
-        if (unmodifiedCommand.empty()) {
-            continue;
-        }
+        if (unmodifiedCommand.empty()) continue;
 
         // Копируем команду и заменяем {section} на текущую секцию
         std::vector<std::string> command;
         for (const auto& arg : unmodifiedCommand) {
-            if (arg == "{section}") {
+            if (arg == "{auto}") {
                 command.push_back(currentSection == "0" ? "UnknownSection" : currentSection);
             } else {
                 command.push_back(arg);
@@ -742,8 +740,7 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
             std::vector<std::string> modifiedCommand;
             for (const std::string& commandArg : command) {
                 if (commandArg.find("{json_data(") != std::string::npos || commandArg.find("{json_source(") != std::string::npos) {
-                    std::string modifiedArg = commandArg;
-                    modifiedArg = replaceJsonSourcePlaceholder(modifiedArg, jsonPath);
+                    std::string modifiedArg = replaceJsonSourcePlaceholder(commandArg, jsonPath);
                     modifiedCommand.push_back(modifiedArg);
                 } else {
                     modifiedCommand.push_back(commandArg);
@@ -752,12 +749,7 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
             command = modifiedCommand;
         }
 
-        // if (commandName == "json-set-current") {
-        //     if (command.size() >= 2) {
-        //         jsonPath = preprocessPath(command[1]);
-        //         offset = removeQuotes(command[2]);
-        //         editJSONfile(jsonPath.c_str(), offset);
-        //     }
+        // --- Команды управления ---
         if (commandName == "catch_errors") {
             catchErrors = true;
         } else if (commandName == "ignore_errors") {
@@ -768,107 +760,73 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
             if (command.size() >= 2) {
                 jsonPath = preprocessPath(command[1]);
             }
-        } else if (commandName == "make" || commandName == "mkdir") {
-            // Make direcrory command
-            if (command[1] != "") {
-                if (command.size() >= 2) {
-                    sourcePath = preprocessPath(command[1]);
-                    createDirectory(sourcePath);
-                }
+        }
+        // --- Работа с файловой системой ---
+        else if (commandName == "make" || commandName == "mkdir") {
+            if (command.size() >= 2 && command[1] != "") {
+                sourcePath = preprocessPath(command[1]);
+                createDirectory(sourcePath);
             } else if (catchErrors) {
                 log("Warning in %s command: path is empty. Command is ignored", commandName.c_str());
             }
-            // Perform actions based on the command name
         } else if (commandName == "copy" || commandName == "cp") {
-            // Copy command
-            if (command.size() >= 3) {
-                if (command[1] != "" && command[2] != "") {
-                    sourcePath = preprocessPath(command[1]);
-                    destinationPath = preprocessPath(command[2]);
-                    bool result;
-                    if (sourcePath.find('*') != std::string::npos) {
-                        // Copy files or directories by pattern
-                        result = copyFileOrDirectoryByPattern(sourcePath, destinationPath);
-                    } else {
-                        result = copyFileOrDirectory(sourcePath, destinationPath);
-                    }
-                    if (!result && catchErrors) {
-                        log("Error in %s command", commandName.c_str());
-                        return -1;
-                    }
-                } else if (catchErrors) {
-                    log("Warning in %s command: source or target is empty. Command is ignored", commandName.c_str());
+            if (command.size() >= 3 && command[1] != "" && command[2] != "") {
+                sourcePath = preprocessPath(command[1]);
+                destinationPath = preprocessPath(command[2]);
+                bool result = (sourcePath.find('*') != std::string::npos)
+                    ? copyFileOrDirectoryByPattern(sourcePath, destinationPath)
+                    : copyFileOrDirectory(sourcePath, destinationPath);
+                if (!result && catchErrors) {
+                    log("Error in %s command", commandName.c_str());
+                    return -1;
                 }
+            } else if (catchErrors) {
+                log("Warning in %s command: source or target is empty. Command is ignored", commandName.c_str());
             }
         } else if (commandName == "mirror_copy" || commandName == "mirror_cp") {
-            // Copy command
             if (command.size() >= 2) {
-                bool result;
                 sourcePath = preprocessPath(command[1]);
-                if (command.size() >= 3) {
-                    destinationPath = preprocessPath(command[2]);
-                    result = mirrorCopyFiles(sourcePath, destinationPath);
-                } else {
-                    result = mirrorCopyFiles(sourcePath);
-                }
+                bool result = (command.size() >= 3)
+                    ? mirrorCopyFiles(sourcePath, preprocessPath(command[2]))
+                    : mirrorCopyFiles(sourcePath);
                 if (!result && catchErrors) {
                     log("Error in %s command", commandName.c_str());
                     return -1;
                 }
             }
         } else if (commandName == "delete" || commandName == "del") {
-            // Delete command
-            if (command.size() >= 2) {
-                bool result;
-                if (command[1] != "") {
-                    sourcePath = preprocessPath(command[1]);
-                    if (!isDangerousCombination(sourcePath)) {
-                        if (sourcePath.find('*') != std::string::npos) {
-                            // Delete files or directories by pattern
-                            result = deleteFileOrDirectoryByPattern(sourcePath);
-                        } else {
-                            result = deleteFileOrDirectory(sourcePath);
-                        }
-                        if (!result && catchErrors) {
-                            log("There is no %s file.", command[1].c_str());
-                        }
+            if (command.size() >= 2 && command[1] != "") {
+                sourcePath = preprocessPath(command[1]);
+                if (!isDangerousCombination(sourcePath)) {
+                    bool result = (sourcePath.find('*') != std::string::npos)
+                        ? deleteFileOrDirectoryByPattern(sourcePath)
+                        : deleteFileOrDirectory(sourcePath);
+                    if (!result && catchErrors) {
+                        log("There is no %s file.", command[1].c_str());
                     }
-                } else if (catchErrors) {
-                    log("Warning in %s command: path is empty. Command is ignored", commandName.c_str());
                 }
+            } else if (catchErrors) {
+                log("Warning in %s command: path is empty. Command is ignored", commandName.c_str());
             }
         } else if (commandName == "mirror_delete" || commandName == "mirror_del") {
             if (command.size() >= 2) {
-                bool result;
                 sourcePath = preprocessPath(command[1]);
-                if (command.size() >= 3) {
-                    destinationPath = preprocessPath(command[2]);
-                    result = mirrorDeleteFiles(sourcePath, destinationPath);
-                } else {
-                    result = mirrorDeleteFiles(sourcePath);
-                }
+                bool result = (command.size() >= 3)
+                    ? mirrorDeleteFiles(sourcePath, preprocessPath(command[2]))
+                    : mirrorDeleteFiles(sourcePath);
                 if (!result && catchErrors) {
                     log("Error in %s command", commandName.c_str());
                     return -1;
                 }
             }
         } else if (commandName == "rename" || commandName == "move" || commandName == "mv") {
-            // Rename command
             if (command.size() >= 3) {
-                bool result;
                 sourcePath = preprocessPath(command[1]);
                 destinationPath = preprocessPath(command[2]);
-                //log("sourcePath: "+sourcePath);
-                //log("destinationPath: "+destinationPath);
-
                 if (!isDangerousCombination(sourcePath)) {
-                    if (sourcePath.find('*') != std::string::npos) {
-                        // Move files by pattern
-                        result = moveFilesOrDirectoriesByPattern(sourcePath, destinationPath);
-                    } else {
-                        // Move single file or directory
-                        result = moveFileOrDirectory(sourcePath, destinationPath);
-                    }
+                    bool result = (sourcePath.find('*') != std::string::npos)
+                        ? moveFilesOrDirectoriesByPattern(sourcePath, destinationPath)
+                        : moveFileOrDirectory(sourcePath, destinationPath);
                     if (!result && catchErrors) {
                         log("Error in %s command", commandName.c_str());
                         return -1;
@@ -878,96 +836,53 @@ int interpretAndExecuteCommand(const std::vector<std::vector<std::string>>& comm
                     return -1;
                 }
             } else if (catchErrors) {
-                log("Error in %s command: expected 2 argunemts, got %ld", commandName.c_str(), command.size() - 1);
+                log("Error in %s command: expected 2 arguments, got %ld", commandName.c_str(), command.size() - 1);
                 return -1;
             }
-
-        } else if (commandName == "set-ini-val" || commandName == "set-ini-value") {
-            // Edit command
+        }
+        // --- Универсальная команда для INI ---
+        else if (commandName == "set-ini-val" || commandName == "set-ini-value") {
             if (command.size() == 3) {
                 sourcePath = preprocessPath(command[1]);
-                // log(command[2]);
                 IniSectionInput iniData = readIniFile(sourcePath);
                 IniSectionInput desiredData = parseDesiredData(command[2]);
                 updateIniData(iniData, desiredData);
                 writeIniFile(sourcePath, iniData);
-
             } else if (command.size() >= 5) {
                 desiredValue = "";
                 sourcePath = preprocessPath(command[1]);
-
                 desiredSection = removeQuotes(command[2]);
                 desiredKey = removeQuotes(command[3]);
 
                 for (size_t i = 4; i < command.size(); ++i) {
                     desiredValue += command[i];
-                    if (i < command.size() - 1) {
-                        desiredValue += " ";
-                    }
+                    if (i < command.size() - 1) desiredValue += " ";
                 }
 
-                bool result = setIniFileValue(sourcePath, desiredSection, desiredKey, desiredValue);
-                if (!result && catchErrors) {
-                    log("Error in %s command", commandName.c_str());
-                    return -1;
-                }
-            }
-		} else if (commandName == "set-ini-timings") {
-            // Команда для добавления одного ключа (eVD2 или eVDQ)
-            if (command.size() >= 5 && command[1] != "" && command[2] != "" && command[3] != "") {
-                sourcePath = preprocessPath(command[1]);
-                desiredSection = removeQuotes(command[2]);
-                std::string key = removeQuotes(command[3]); // eVD2 или eVDQ
-                std::string value = removeQuotes(command[4]); // Значение из JSON или прямое
-
-                // Проверка, что секция валидна
-                if (desiredSection == "UnknownSection") {
-                    log("Error in %s command: Could not determine section from loader.kip", commandName.c_str());
-                    if (listItem) listItem->setValue("FAIL: Invalid section", tsl::PredefinedColors::Red);
-                    return -1;
+                // --- поддержка +key для авто-создания ключа ---
+                bool autoCreate = false;
+                if (!desiredKey.empty() && desiredKey[0] == '+') {
+                    autoCreate = true;
+                    desiredKey = desiredKey.substr(1); // убираем '+'
                 }
 
-                // Проверка, что ключ — eVD2 или eVDQ
-                if (key != "eVD2" && key != "eVDQ") {
-                    log("Error in %s command: Invalid key '%s', expected 'eVD2' or 'eVDQ'", commandName.c_str(), key.c_str());
-                    if (listItem) listItem->setValue("FAIL: Invalid key", tsl::PredefinedColors::Red);
-                    return -1;
-                }
-
-                // Валидация значения как целого числа
-                try {
-                    std::stoi(value);
-                } catch (...) {
-                    log("Error in %s command: Value '%s' for key '%s' is not an integer", commandName.c_str(), value.c_str(), key.c_str());
-                    if (listItem) listItem->setValue("FAIL: Invalid value", tsl::PredefinedColors::Red);
-                    return -1;
-                }
-
-                // Читаем существующий INI-файл
                 IniSectionInput iniData = readIniFile(sourcePath);
-                // Если файл не существует, iniData будет пустым, но это допустимо
 
-                // Добавляем или обновляем значение в секции
-                iniData[desiredSection][key] = value;
+                if (iniData.find(desiredSection) == iniData.end()) {
+                    iniData[desiredSection] = IniKeyValue{};
+                }
 
-                // Сохраняем изменения
-                writeIniFile(sourcePath, iniData);
-
-                // Проверка успешности записи (например, проверка существования файла)
-                FILE* fileCheck = fopen(sourcePath.c_str(), "rb");
-                bool result = (fileCheck != nullptr);
-                if (fileCheck) fclose(fileCheck);
-
-                if (!result && catchErrors) {
-                    log("Error in %s command: Failed to write to %s", commandName.c_str(), sourcePath.c_str());
-                    if (listItem) listItem->setValue("FAIL: Write error", tsl::PredefinedColors::Red);
+                if (iniData[desiredSection].find(desiredKey) != iniData[desiredSection].end()) {
+                    iniData[desiredSection][desiredKey] = desiredValue;
+                } else if (autoCreate) {
+                    iniData[desiredSection][desiredKey] = desiredValue;
+                } else if (catchErrors) {
+                    log("Error in %s command: key '%s' not found in section '%s'", commandName.c_str(), desiredKey.c_str(), desiredSection.c_str());
+                    if (listItem) listItem->setValue("FAIL: Key not found", tsl::PredefinedColors::Red);
                     return -1;
                 }
-                if (listItem) listItem->setValue("SUCCESS", tsl::PredefinedColors::Green);
-            } else if (catchErrors) {
-                log("Error in %s command: expected at least 4 arguments, got %ld", commandName.c_str(), command.size() - 1);
-                if (listItem) listItem->setValue("FAIL: Invalid arguments", tsl::PredefinedColors::Red);
-                return -1;
+
+                writeIniFile(sourcePath, iniData);
             }
         } else if (commandName == "set-ini-key") {
             // Edit command
@@ -1565,7 +1480,6 @@ std::pair<std::string, int> dispKipCustomDataFromJson(const std::string& jsonCus
 
 std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std::string& kipPath = "/atmosphere/kips/loader.kip", bool spacing = false)
 {
-
     std::string currentHex = "";
     std::string extent = "";
     std::string output = "";
@@ -1581,8 +1495,6 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
     int tableState = 0;
     std::vector<std::string> baseList;
     std::vector<std::string> baseIncList;
-
-    // kipPath = std::string("/atmosphere/kips/loader.kip");
 
     if (!isFileOrDirectory(jsonPath)) {
         return std::make_pair(output, lineCount);
@@ -1608,16 +1520,15 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
             json_t* item = json_array_get(jsonData, i);
             if (item && json_is_object(item)) {
                 json_t* keyValue = json_object_get(item, "name");
-                // log(json_string_value(keyValue));
                 std::string tabBaseCheck;
                 if (keyValue)
                     tabBaseCheck = json_string_value(keyValue);
+
                 if (tabBaseCheck == "TABLE_BASE") {
                     tableShiftMode = true;
                     const size_t offset = custOffset + 44U;
                     const std::string tableStateStr = readHexDataAtOffsetF(file, offset, 1);
                     tableState = reversedHexToInt(tableStateStr);
-                    //log(tableStateStr);
 
                     json_t* j_base = json_object_get(item, "base");
                     std::string base = json_string_value(j_base);
@@ -1625,7 +1536,6 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                     std::string baseItem;
 
                     if (base.find(',') != std::string::npos) {
-                        // Split the string by commas and store each offset in a vector
                         while (std::getline(iss2, baseItem, ',')) {
                             baseList.push_back(baseItem);
                         }
@@ -1641,13 +1551,110 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                     std::string baseIncItem;
 
                     if (base_inc.find(',') != std::string::npos) {
-                        // Split the string by commas and store each offset in a vector
                         while (std::getline(iss, baseIncItem, ',')) {
                             baseIncList.push_back(baseIncItem);
                         }
                     }
                 } else {
                     if (keyValue && json_is_string(keyValue)) {
+                        name = json_string_value(keyValue);
+
+                        // --- INI support (твой код как есть) ---
+                        json_t* j_ini = json_object_get(item, "ini");
+                        json_t* j_show_section = json_object_get(item, "show_section");
+                        bool showSection = j_show_section && json_is_true(j_show_section);
+
+                        if (j_ini) {
+                            const char* iniPath = json_string_value(j_ini);
+                            const char* sectionC = nullptr;
+                            json_t* j_section = json_object_get(item, "section");
+                            if (j_section) sectionC = json_string_value(j_section);
+
+                            const char* keyC = nullptr;
+                            json_t* j_key = json_object_get(item, "key");
+                            if (j_key) keyC = json_string_value(j_key);
+
+                            std::string section;
+                            if (sectionC && std::string(sectionC) == "auto") {
+                                section = getCurrentIniSection(kipPath);
+                            } else if (sectionC) {
+                                section = sectionC;
+                            } else {
+                                section = getCurrentIniSection(kipPath);
+                            }
+
+                            if (iniPath && keyC && !section.empty()) {
+                                std::ifstream iniFile(iniPath);
+                                if (!iniFile.is_open()) {
+                                    output += name + ": [INI not found]";
+                                } else {
+                                    auto iniData = parseIni(iniFile);
+                                    std::string combinedValue;
+                                    std::string keyList = keyC;
+                                    std::istringstream keyStream(keyList);
+                                    std::string singleKey;
+
+                                    while (std::getline(keyStream, singleKey, ',')) {
+                                        singleKey.erase(std::remove_if(singleKey.begin(), singleKey.end(), ::isspace), singleKey.end());
+                                        auto secIt = iniData.find(section);
+                                        if (secIt != iniData.end()) {
+                                            auto keyIt = secIt->second.find(singleKey);
+                                            if (keyIt != secIt->second.end()) {
+                                                if (!combinedValue.empty()) combinedValue += " | ";
+                                                combinedValue += keyIt->second;
+                                            }
+                                        }
+                                    }
+
+                                    if (combinedValue.empty()) combinedValue = "[Key not found]";
+                                    if (section == "0") combinedValue += " [Invalid section]";
+                                    else if (showSection) combinedValue += " (" + section + ")";
+
+                                    // применяем prefix/extent, если есть
+                                    json_t* j_prefix = json_object_get(item, "prefix");
+                                    json_t* j_extent = json_object_get(item, "extent");
+
+                                    std::string valueOnly = combinedValue;
+                                    // убираем " (Section)" из числа, если вдруг вернулся формат вроде "600 (xxxx)"
+                                    auto parPos = valueOnly.find(" (");
+                                    if (parPos != std::string::npos)
+                                        valueOnly = valueOnly.substr(0, parPos);
+
+                                    // пробуем привести к числу
+                                    int iniInt = 0;
+                                    bool isNumeric = false;
+                                    try {
+                                        iniInt = std::stoi(valueOnly);
+                                        isNumeric = true;
+                                    } catch (...) {
+                                        isNumeric = false;
+                                    }
+
+                                    output += name + ": ";
+                                    if (isNumeric) {
+                                        if (j_prefix) {
+                                            output += std::string(json_string_value(j_prefix));
+                                        }
+                                        output += std::to_string(iniInt);
+                                        if (j_extent) {
+                                            output += std::string(json_string_value(j_extent));
+                                        }
+                                    } else {
+                                        output += combinedValue;
+                                    }
+
+                                    iniFile.close();
+                                }
+                            } else {
+                                output += name + ": [Invalid INI parameters]";
+                            }
+                            output += '\n';
+                            lineCount++;
+                            continue; // пропускаем KIP для этого элемента
+                        }
+                        // --- конец блока INI ---
+
+                        // --- дальше твой старый KIP-код ---
                         json_t* j_offset = json_object_get(item, "offset");
                         json_t* j_length = json_object_get(item, "length");
                         json_t* j_extent = json_object_get(item, "extent");
@@ -1671,7 +1678,6 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                             } else {
                                 length = 4;
                             }
-                            name = json_string_value(keyValue);
                             offsetStr = json_string_value(j_offset);
                             if (j_extent) {
                                 extent = json_string_value(j_extent);
@@ -1688,11 +1694,10 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                 std::istringstream iss(offsetStr);
                                 std::string offsetItem;
                                 std::string current = "";
-                                // Split the string by commas and process each offset
                                 while (std::getline(iss, offsetItem, ',')) {
                                     try {
                                         const size_t offset = custOffset + std::stoul(offsetItem);
-                                        const std::string tempHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip
+                                        const std::string tempHex = readHexDataAtOffsetF(file, offset, length);
                                         int intValue = reversedHexToInt(tempHex);
 										 if (j_increment) {
 											intValue += std::stoi(json_string_value(j_increment));
@@ -1706,7 +1711,6 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                 output += name + ": " + current;
                             } else {
                                 if (allign) {
-                                    // Format the string to have two columns; Calculate number of spaces needed
                                     size_t found = output.rfind('\n');
                                     int numreps = 33 - (output.length() - found - 1) - name.length() - length - 4;
                                     if (!extent.empty()) {
@@ -1717,34 +1721,33 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                 }
 
                                 if (tableShiftMode) {
-                                    //log(std::to_string(std::stoi(baseList[tableState]) + (std::stoi(offset) * std::stoi(baseIncList[tableState]))));
                                     const size_t findFreq = std::stoi(baseList[tableState]) + (std::stoul(offsetStr) * std::stoi(baseIncList[tableState]));
                                     const size_t offset = custOffset + findFreq;
                                     if (!j_ref) {
-                                        currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
+                                        currentHex = readHexDataAtOffsetF(file, offset, length);
                                     } else {
                                         currentHex = findCurrentKip(ref, std::to_string(offset), file, custOffset);
                                         if (currentHex == "\u25B6") {
                                             ref = "";
-                                            currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
+                                            currentHex = readHexDataAtOffsetF(file, offset, length);
                                         }
                                     }
                                 } else {
                                     if (!j_ref) {
                                         const size_t offset = custOffset + std::stoul(offsetStr);
-                                        currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
+                                        currentHex = readHexDataAtOffsetF(file, offset, length);
                                     } else {
                                         currentHex = findCurrentKip(ref, offsetStr, file, custOffset);
                                         if (currentHex == "\u25B6") {
                                             ref = "";
                                             const size_t offset = custOffset + std::stoul(offsetStr);
-                                            currentHex = readHexDataAtOffsetF(file, offset, length); // Read the data from kip with offset starting from 'C' in 'CUST'
+                                            currentHex = readHexDataAtOffsetF(file, offset, length);
                                         }
                                     }
                                 }
                                 if (ref == "") {
                                     int intValue = reversedHexToInt(currentHex);
-                                    if (j_increment) { // Add increment value from the JSON to the displayed value
+                                    if (j_increment) {
                                         intValue += std::stoi(json_string_value(j_increment));
                                     }
                                     if (intValue > 10000) {
@@ -1772,7 +1775,7 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                             } else {
                                 allign = true;
                             }
-                        } else { // When state = filler
+                        } else { // filler
                             std::string name = json_string_value(keyValue);
                             if (spacing) {
                                 output += '\n';
@@ -1790,6 +1793,7 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
     }
     return std::make_pair(output, lineCount);
 }
+
 
 std::pair<std::string, int> dispRAMTmpl(const std::string& dataPath, const std::string& selectedItem)
 {

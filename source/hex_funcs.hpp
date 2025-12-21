@@ -427,7 +427,7 @@ int reversedHexToInt(const std::string& hex_str) {
         result = (result << 8) | byte_value;
     }
 
-    // Определяем длину (в байтах)
+      // Определяем длину (в байтах)
     int byteCount = len / 2;
 
     // ✅ Возвращаем значение в корректном signed-формате
