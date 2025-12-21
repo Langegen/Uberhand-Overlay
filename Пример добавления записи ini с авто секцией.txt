@@ -9,3 +9,8 @@ catch_errors
 json_mark_cur_ini '/switch/.packages/4Wizard/4Advanced/4IFIR Optimised/json/Vddq.json' name '/config/4IFIR/emc_timings.ini' {section} eVDQ
 set-ini-val '/config/4IFIR/emc_timings.ini' {auto} +eVDQ {json_source(*,dec)}
 back
+
+
+Если ключи eVD2 или eVDQ отсутствуют → создаются автоматически благодаря префиксу +.
+
+Если ключ указан без + и его нет → будет ошибка (или log + FAIL, если catch_errors включён).
