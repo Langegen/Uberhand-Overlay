@@ -337,9 +337,17 @@ std::string getCurrentKipCustomDataJson(const std::vector<std::string>& jsonPath
                 if (item && json_is_object(item)) {
                     json_t* keyValue = json_object_get(item, "name");
                     // log(json_string_value(keyValue));
+
+                    // --- skip ini entries ---
+                    json_t* j_ini = json_object_get(item, "ini");
+                    if (j_ini) {
+                        continue;
+                    }
+
                     std::string tabBaseCheck;
-                    if (keyValue)
+                    if (keyValue && json_is_string(keyValue))
                         tabBaseCheck = json_string_value(keyValue);
+
                     if (tabBaseCheck == "TABLE_BASE") {
                         tableShiftMode = true;
                         const size_t offset = custOffset + 44U;
@@ -382,16 +390,18 @@ std::string getCurrentKipCustomDataJson(const std::vector<std::string>& jsonPath
                             json_t* j_state     = json_object_get(item, "state");
                             json_t* j_increment = json_object_get(item, "increment");
 
-                            if (j_state) {
+                            if (j_state && json_is_string(j_state)) {
                                 state = json_string_value(j_state);
                             } else {
                                 state = "";
                             }
 
-                            if (state != "filler" || state.empty()) {
+                            if (state.empty() || state != "filler") {
                                 if (!j_offset || !j_length) {
-                                    return output;
+                                    log("Skip item without offset/length: %s", json_string_value(keyValue));
+                                    continue;
                                 }
+
                                 name = json_string_value(keyValue);
                                 offsetStr = json_string_value(j_offset);
                                 length = std::stoi(json_string_value(j_length));
@@ -503,6 +513,7 @@ std::string getCurrentKipCustomDataJson(const std::vector<std::string>& jsonPath
     output = std::string(json_dumps(jsonKipCustomSettings, JSON_ENCODE_ANY));
     return output;
 }
+
 
 void scrollListItems(tsl::Gui* gui, ShiftFocusMode mode)
 {
@@ -1314,11 +1325,11 @@ std::pair<std::string, int> dispKipIniData(const std::string& jsonPath) {
         } else if (strcmp(key, "eBAL") == 0) {
             value = std::to_string(eBAL);
         } else {
-            value = timings.count(key) && !timings[key].empty() ? timings[key] : "N/A";
+            value = timings.count(key) && !timings[key].empty() ? timings[key] : "--";
         }
 
         // Получение парного значения
-        std::string pairValue = pairKey && timings.count(pairKey) && !timings[pairKey].empty() ? timings[pairKey] : "N/A";
+        std::string pairValue = pairKey && timings.count(pairKey) && !timings[pairKey].empty() ? timings[pairKey] : "--";
 
         // Сборка строки
         std::string lineText = std::string(name) + ": " + value + (pairKey ? " | " + pairValue : "") + (extent ? std::string(extent) : "");
@@ -1606,8 +1617,8 @@ std::pair<std::string, int> dispCustData(const std::string& jsonPath, const std:
                                         }
                                     }
 
-                                    if (combinedValue.empty()) combinedValue = "[Key not found]";
-                                    if (section == "0") combinedValue += " [Invalid section]";
+                                    if (combinedValue.empty()) combinedValue = "[0]";
+                                    if (section == "0") combinedValue += " [0 section]";
                                     else if (showSection) combinedValue += " (" + section + ")";
 
                                     // применяем prefix/extent, если есть
